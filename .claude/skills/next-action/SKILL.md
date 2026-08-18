@@ -1,9 +1,9 @@
 ---
 name: next-action
-description: Recompute one precise executable next action from destination, frontier, blockers, known facts, questions, and fog.
+description: 根据目标、行动前沿、阻塞、已知事实、问题与迷雾，重新选择一个精确且可执行的下一步。
 ---
 
-# Next Action
+# 下一步导航
 
-Read `.agents/skills/next-action/SKILL.md` completely and follow it as the sole workflow.
-This file is only the Claude Code discovery wrapper; do not maintain a second implementation here.
+完整读取 `.agents/skills/next-action/SKILL.md`，并把它作为唯一工作流执行。
+本文件只是 Claude Code 的发现包装层，不要在这里维护第二份实现。

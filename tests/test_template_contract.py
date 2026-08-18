@@ -29,7 +29,15 @@ class TemplateContractTest(unittest.TestCase):
         return result.stdout.strip()
 
     def test_required_entrypoints_exist(self):
-        for path in ("README.md", "AGENTS.md", "CLAUDE.md", "PROJECT.md", "LICENSE"):
+        for path in (
+            "README.md",
+            "AGENTS.md",
+            "CLAUDE.md",
+            "PROJECT.md",
+            "LICENSE",
+            "LICENSE.zh-CN",
+            "docs/home-engineering.md",
+        ):
             self.assertTrue((ROOT / path).is_file(), path)
         for skill in SKILLS:
             self.assertTrue((ROOT / f".agents/skills/{skill}/SKILL.md").is_file(), skill)
@@ -43,8 +51,8 @@ class TemplateContractTest(unittest.TestCase):
             wrapper = (ROOT / f".claude/skills/{skill}/SKILL.md").read_text()
             self.assertIn(f"name: {skill}", wrapper)
             self.assertIn(f".agents/skills/{skill}/SKILL.md", wrapper)
-            self.assertIn("discovery wrapper", wrapper)
-            self.assertNotIn("## Workflow", wrapper)
+            self.assertIn("发现包装层", wrapper)
+            self.assertNotIn("## 工作流程", wrapper)
 
     def test_skills_have_portable_metadata_and_no_placeholders(self):
         for skill in SKILLS:
@@ -79,6 +87,20 @@ class TemplateContractTest(unittest.TestCase):
         self.assertEqual(readme.count("project-summary:end"), 1)
         for skill in SKILLS:
             self.assertIn(f"`{skill}`", readme)
+        self.assertIn("docs/home-engineering.md", readme)
+
+    def test_user_facing_surfaces_are_simplified_chinese(self):
+        for skill in SKILLS:
+            canonical = (ROOT / f".agents/skills/{skill}/SKILL.md").read_text()
+            wrapper = (ROOT / f".claude/skills/{skill}/SKILL.md").read_text()
+            metadata = (ROOT / f".agents/skills/{skill}/agents/openai.yaml").read_text()
+            self.assertRegex(canonical, r"[\u4e00-\u9fff]")
+            self.assertRegex(wrapper, r"[\u4e00-\u9fff]")
+            self.assertRegex(metadata, r"[\u4e00-\u9fff]")
+            self.assertNotIn("This file is only", wrapper)
+            self.assertNotIn("Use $", metadata)
+        help_text = self.run_workflow(ROOT, "--help")
+        self.assertIn("仓库内置的 Task/Loop/Run 工作流", help_text)
 
     def test_task_loop_run_round_trip_and_contract_immutability(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -88,11 +110,11 @@ class TemplateContractTest(unittest.TestCase):
                 "open-task",
                 "compiler-research",
                 "--title",
-                "Compiler Research",
+                "编译器研究",
                 "--objective",
-                "Find the failing compiler layer",
+                "找到发生故障的编译器层级",
                 "--acceptance",
-                "The failing layer is supported by evidence",
+                "有证据支持故障层级结论",
             )
             self.run_workflow(
                 root,
@@ -101,13 +123,13 @@ class TemplateContractTest(unittest.TestCase):
                 "--kind",
                 "clarify",
                 "--action",
-                "Inspect the smallest failing artifact",
+                "检查最小失败产物",
                 "--target",
-                "failure boundary",
+                "故障边界",
                 "--done-when",
-                "one falsifiable hypothesis exists",
+                "形成一个可证伪假设",
                 "--why-now",
-                "it reduces the main uncertainty",
+                "它能减少主要未知项",
                 "--source-ref",
                 "PROJECT.md",
             )
@@ -117,25 +139,28 @@ class TemplateContractTest(unittest.TestCase):
                 task,
                 "lowering",
                 "--goal",
-                "Test whether lowering introduces the failure",
+                "验证下沉阶段是否引入故障",
                 "--hypothesis",
-                "The first invalid IR appears during lowering",
+                "第一个无效 IR 出现在下沉阶段",
                 "--acceptance",
-                "Before and after IR isolate the first invalid form",
+                "前后 IR 能隔离第一个无效形态",
                 "--falsification",
-                "The invalid form exists before lowering",
+                "无效形态在下沉前已经存在",
             )
+            self.assertIn("# Loop 目标", (root / loop / "goal.md").read_text())
+            self.assertIn("## 验收条件", (root / loop / "goal.md").read_text())
+            self.assertIn("# 假设", (root / loop / "hypotheses.md").read_text())
             run = self.run_workflow(
                 root,
                 "open-run",
                 loop,
                 "minimal-probe",
                 "--objective",
-                "Generate the smallest before and after IR pair",
+                "生成最小前后 IR 对",
                 "--acceptance",
-                "Both IR files are captured and comparable",
+                "两份 IR 均已捕获且可以比较",
                 "--allowed-change",
-                "temporary probe only",
+                "只允许临时探针",
             )
             contract = root / run / "contract.json"
             original_contract = contract.read_bytes()
@@ -146,13 +171,13 @@ class TemplateContractTest(unittest.TestCase):
                 "--kind",
                 "execute",
                 "--action",
-                "Run the minimal compiler probe",
+                "运行最小编译器探针",
                 "--target",
-                "before and after IR",
+                "前后 IR",
                 "--done-when",
-                "both IR files exist",
+                "两份 IR 文件都存在",
                 "--why-now",
-                "the Run contract is clear",
+                "Run 合同已经清晰",
                 "--source-ref",
                 f"{run}/contract.json",
             )
@@ -163,15 +188,15 @@ class TemplateContractTest(unittest.TestCase):
                 "--kind",
                 "validation",
                 "--summary",
-                "The first invalid form appears after lowering",
+                "第一个无效形态出现在下沉之后",
                 "--result",
-                "Before IR is valid and after IR is invalid",
+                "下沉前 IR 有效，下沉后 IR 无效",
                 "--evidence-ref",
                 "artifacts/before.mlir",
                 "--evidence-ref",
                 "artifacts/after.mlir",
                 "--limitation",
-                "The probe covers one minimized case",
+                "探针只覆盖一个最小用例",
             )
             self.run_workflow(
                 root,
@@ -180,7 +205,7 @@ class TemplateContractTest(unittest.TestCase):
                 "--verdict",
                 "passed",
                 "--summary",
-                "The probe isolated the lowering boundary",
+                "探针隔离了下沉边界",
             )
             self.assertEqual(contract.read_bytes(), original_contract)
             self.run_workflow(
@@ -190,7 +215,7 @@ class TemplateContractTest(unittest.TestCase):
                 "--verdict",
                 "confirmed",
                 "--summary",
-                "Lowering is the first failing layer",
+                "下沉是第一个发生故障的层级",
             )
             self.run_workflow(
                 root,
@@ -199,14 +224,14 @@ class TemplateContractTest(unittest.TestCase):
                 "--verdict",
                 "completed",
                 "--summary",
-                "The failing compiler layer is identified",
+                "已经识别发生故障的编译器层级",
             )
-            self.assertEqual(self.run_workflow(root, "check"), "ok")
+            self.assertEqual(self.run_workflow(root, "check"), "通过")
             result = json.loads((root / run / "result.json").read_text())
             self.assertEqual(result["verdict"], "passed")
             self.assertEqual(result["checkpoint_refs"], ["CP001"])
             changed_contract = json.loads(contract.read_text())
-            changed_contract["objective"] = "Rewritten after execution"
+            changed_contract["objective"] = "执行后被改写"
             contract.write_text(json.dumps(changed_contract))
             self.run_workflow(root, "check", run, expected=2)
 
@@ -218,9 +243,9 @@ class TemplateContractTest(unittest.TestCase):
                 "open-task",
                 "one",
                 "--title",
-                "One",
+                "唯一方向",
                 "--objective",
-                "One objective",
+                "一个目标",
             )
             rejected = self.run_workflow(
                 root,
@@ -229,13 +254,13 @@ class TemplateContractTest(unittest.TestCase):
                 "--kind",
                 "execute",
                 "--action",
-                "Implement an unknown direction",
+                "实施未知方向",
                 "--target",
-                "foggy objective",
+                "模糊目标",
                 "--done-when",
-                "implementation exists",
+                "实现已经存在",
                 "--why-now",
-                "no valid reason",
+                "没有有效理由",
                 "--source-ref",
                 "PROJECT.md",
                 expected=2,
@@ -247,13 +272,13 @@ class TemplateContractTest(unittest.TestCase):
                 task,
                 "first",
                 "--goal",
-                "First direction",
+                "第一个方向",
                 "--hypothesis",
-                "First hypothesis",
+                "第一个假设",
                 "--acceptance",
-                "First evidence",
+                "第一份证据",
                 "--falsification",
-                "Contrary evidence",
+                "相反证据",
             )
             duplicate = self.run_workflow(
                 root,
@@ -261,13 +286,13 @@ class TemplateContractTest(unittest.TestCase):
                 task,
                 "second",
                 "--goal",
-                "Second direction",
+                "第二个方向",
                 "--hypothesis",
-                "Second hypothesis",
+                "第二个假设",
                 "--acceptance",
-                "Second evidence",
+                "第二份证据",
                 "--falsification",
-                "Contrary evidence",
+                "相反证据",
                 expected=2,
             )
             self.assertEqual(duplicate, "")
@@ -277,9 +302,9 @@ class TemplateContractTest(unittest.TestCase):
                 loop,
                 "first",
                 "--objective",
-                "First execution",
+                "第一次执行",
                 "--acceptance",
-                "Observed result",
+                "已观察到结果",
             )
             duplicate = self.run_workflow(
                 root,
@@ -287,9 +312,9 @@ class TemplateContractTest(unittest.TestCase):
                 loop,
                 "second",
                 "--objective",
-                "Second execution",
+                "第二次执行",
                 "--acceptance",
-                "Observed result",
+                "已观察到结果",
                 expected=2,
             )
             self.assertEqual(duplicate, "")

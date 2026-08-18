@@ -30,6 +30,31 @@ class WorkflowError(Exception):
     pass
 
 
+class ChineseArgumentParser(argparse.ArgumentParser):
+    def __init__(self, *args, **kwargs):
+        kwargs["add_help"] = False
+        super().__init__(*args, **kwargs)
+        self.add_argument("-h", "--help", action="help", help="显示帮助并退出")
+        self._positionals.title = "位置参数"
+        self._optionals.title = "选项"
+
+    def format_help(self):
+        return super().format_help().replace("usage:", "用法：")
+
+    def format_usage(self):
+        return super().format_usage().replace("usage:", "用法：")
+
+    def error(self, message):
+        message = message.replace(
+            "the following arguments are required:", "缺少必需参数："
+        )
+        message = message.replace("unrecognized arguments:", "无法识别的参数：")
+        message = message.replace("invalid choice:", "值无效：")
+        message = message.replace("choose from", "可选值")
+        self.print_usage(sys.stderr)
+        self.exit(2, f"{self.prog}：错误：{message}\n")
+
+
 def now():
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -41,7 +66,7 @@ def project_root():
 def slugify(value):
     slug = SLUG_RE.sub("-", value.lower()).strip("-")
     if not slug:
-        raise WorkflowError("slug must contain an ASCII letter or digit")
+        raise WorkflowError("slug 必须至少包含一个 ASCII 字母或数字")
     return slug
 
 
@@ -49,9 +74,9 @@ def read_json(path):
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
-        raise WorkflowError(f"missing file: {path}") from exc
+        raise WorkflowError(f"缺少文件：{path}") from exc
     except json.JSONDecodeError as exc:
-        raise WorkflowError(f"invalid JSON: {path}: {exc}") from exc
+        raise WorkflowError(f"JSON 无效：{path}：{exc}") from exc
 
 
 def write_json(path, value):
@@ -69,7 +94,7 @@ def ensure_under(root, path):
     try:
         path.relative_to(root)
     except ValueError as exc:
-        raise WorkflowError(f"path escapes project root: {path}") from exc
+        raise WorkflowError(f"路径越出项目根目录：{path}") from exc
     return path
 
 
@@ -101,7 +126,7 @@ def navigation(summary, clarity, completion_conditions=None):
         "fog": [],
         "out_of_scope": [],
         "candidates": [],
-        "next_action": None,
+        "next_action": None,  # 关键：任何时刻只选择一个当前动作。
         "blockers": [],
     }
 
@@ -119,7 +144,7 @@ def copy_grill_templates(task_path, objective):
 
 def require_active(record, path):
     if record.get("status") != "active":
-        raise WorkflowError(f"record is not active: {path}")
+        raise WorkflowError(f"记录不是活动状态：{path}")
 
 
 def cmd_open_task(args):
@@ -154,7 +179,7 @@ def cmd_open_loop(args):
     task_record = read_json(task / "task.json")
     require_active(task_record, task)
     if task_record.get("active_loop_id"):
-        raise WorkflowError(f"task already has an active Loop: {task_record['active_loop_id']}")
+        raise WorkflowError(f"Task 已有活动 Loop：{task_record['active_loop_id']}")
     loops = task / "loops"
     loops.mkdir(exist_ok=True)
     loop_id = next_id(loops, args.slug)
@@ -163,17 +188,17 @@ def cmd_open_loop(args):
     (path / "runs").mkdir()
     timestamp = now()
     goal = (
-        "# Loop Goal\n\n"
+        "# Loop 目标\n\n"
         f"{args.goal}\n\n"
-        "## Acceptance\n\n"
+        "## 验收条件\n\n"
         + "\n".join(f"- {item}" for item in args.acceptance)
-        + "\n\n## Falsification\n\n"
+        + "\n\n## 证伪条件\n\n"
         + "\n".join(f"- {item}" for item in args.falsification)
-        + "\n\n## Source Grill\n\n- `../../grill/design-brief.md`\n"
+        + "\n\n## 来源梳理\n\n- `../../grill/design-brief.md`\n"
     )
     (path / "goal.md").write_text(goal, encoding="utf-8")
     (path / "hypotheses.md").write_text(
-        f"# Hypotheses\n\n- H1: {args.hypothesis}\n", encoding="utf-8"
+        f"# 假设\n\n- H1：{args.hypothesis}\n", encoding="utf-8"
     )
     state = {
         "schema_version": SCHEMA_VERSION,
@@ -199,7 +224,7 @@ def cmd_open_run(args):
     loop_state = read_json(loop / "state.json")
     require_active(loop_state, loop)
     if loop_state.get("active_run_id"):
-        raise WorkflowError(f"loop already has an active Run: {loop_state['active_run_id']}")
+        raise WorkflowError(f"Loop 已有活动 Run：{loop_state['active_run_id']}")
     runs = loop / "runs"
     runs.mkdir(exist_ok=True)
     run_id = next_id(runs, args.slug)
@@ -253,7 +278,7 @@ def load_navigation_record(root, reference):
             path = path / "state.json"
     record = read_json(path)
     if "navigation" not in record:
-        raise WorkflowError(f"record has no navigation: {path}")
+        raise WorkflowError(f"记录没有导航状态：{path}")
     require_active(record, path)
     return path, record
 
@@ -268,7 +293,7 @@ def cmd_set_next_action(args):
         "clear": set(ACTION_KINDS),
     }
     if clarity not in allowed or args.kind not in allowed[clarity]:
-        raise WorkflowError(f"action kind {args.kind!r} is invalid for clarity {clarity!r}")
+        raise WorkflowError(f"动作类型 {args.kind!r} 不适用于清晰度 {clarity!r}")
     used = [int(item["id"][1:]) for item in nav["candidates"] if re.fullmatch(r"A\d+", item.get("id", ""))]
     candidate_id = f"A{max(used, default=0) + 1:03d}"
     candidate = {
@@ -314,14 +339,14 @@ def cmd_block(args):
 def read_checkpoints(path):
     records = []
     if not path.exists():
-        raise WorkflowError(f"missing file: {path}")
+        raise WorkflowError(f"缺少文件：{path}")
     for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
         if not line.strip():
             continue
         try:
             records.append(json.loads(line))
         except json.JSONDecodeError as exc:
-            raise WorkflowError(f"invalid JSONL: {path}:{number}: {exc}") from exc
+            raise WorkflowError(f"JSONL 无效：{path}:{number}：{exc}") from exc
     return records
 
 
@@ -332,7 +357,7 @@ def cmd_checkpoint(args):
     require_active(state, run)
     checkpoints = read_checkpoints(run / "checkpoints.jsonl")
     if args.supersedes and args.supersedes not in {item.get("id") for item in checkpoints}:
-        raise WorkflowError(f"superseded checkpoint does not exist: {args.supersedes}")
+        raise WorkflowError(f"被替代的检查点不存在：{args.supersedes}")
     checkpoint_id = f"CP{len(checkpoints) + 1:03d}"
     record = {
         "schema_version": SCHEMA_VERSION,
@@ -367,7 +392,7 @@ def cmd_close_run(args):
     require_active(state, run)
     checkpoints = read_checkpoints(run / "checkpoints.jsonl")
     if not checkpoints:
-        raise WorkflowError("close-run requires at least one evidence checkpoint")
+        raise WorkflowError("关闭 Run 前至少需要一个证据检查点")
     timestamp = now()
     write_json(
         run / "result.json",
@@ -398,7 +423,7 @@ def cmd_close_loop(args):
     state = read_json(loop / "state.json")
     require_active(state, loop)
     if state.get("active_run_id"):
-        raise WorkflowError(f"close the active Run first: {state['active_run_id']}")
+        raise WorkflowError(f"请先关闭活动 Run：{state['active_run_id']}")
     timestamp = now()
     state["status"] = "terminal"
     state["updated_at"] = timestamp
@@ -418,7 +443,7 @@ def cmd_close_task(args):
     record = read_json(task / "task.json")
     require_active(record, task)
     if record.get("active_loop_id"):
-        raise WorkflowError(f"close the active Loop first: {record['active_loop_id']}")
+        raise WorkflowError(f"请先关闭活动 Loop：{record['active_loop_id']}")
     record["status"] = "terminal"
     record["updated_at"] = now()
     record["outcome"] = {"verdict": args.verdict, "summary": args.summary}
@@ -429,9 +454,9 @@ def cmd_close_task(args):
 def require_fields(record, fields, path):
     missing = [field for field in fields if field not in record]
     if missing:
-        raise WorkflowError(f"missing fields in {path}: {', '.join(missing)}")
+        raise WorkflowError(f"{path} 缺少字段：{', '.join(missing)}")
     if record.get("schema_version") != SCHEMA_VERSION:
-        raise WorkflowError(f"unsupported schema_version in {path}")
+        raise WorkflowError(f"{path} 使用了不支持的 schema_version")
 
 
 def check_navigation(record, path):
@@ -442,15 +467,15 @@ def check_navigation(record, path):
         if field not in (nav or {})
     ]
     if missing:
-        raise WorkflowError(f"missing navigation fields in {path}: {', '.join(missing)}")
+        raise WorkflowError(f"{path} 缺少导航字段：{', '.join(missing)}")
     clarity = nav["destination"].get("clarity")
     if clarity not in ("foggy", "provisional", "clear"):
-        raise WorkflowError(f"invalid destination clarity in {path}")
+        raise WorkflowError(f"{path} 的目标清晰度无效")
     selected = nav["next_action"]
     if selected is not None:
         ids = {item.get("id") for item in nav["candidates"]}
         if selected.get("candidate_id") not in ids:
-            raise WorkflowError(f"next_action selects a missing candidate in {path}")
+            raise WorkflowError(f"{path} 的 next_action 指向不存在的候选")
 
 
 def check_run(run):
@@ -460,64 +485,64 @@ def check_run(run):
     require_fields(contract, ("schema_version", "kind", "id", "loop_id", "task_id", "objective", "acceptance"), run / "contract.json")
     require_fields(state, ("schema_version", "kind", "id", "loop_id", "task_id", "status", "contract_sha256", "navigation"), run / "state.json")
     if contract["id"] != run.name or state["id"] != run.name:
-        raise WorkflowError(f"Run id does not match directory: {run}")
+        raise WorkflowError(f"Run ID 与目录名不一致：{run}")
     if contract["loop_id"] != state["loop_id"] or contract["task_id"] != state["task_id"]:
-        raise WorkflowError(f"Run contract/state identity mismatch: {run}")
+        raise WorkflowError(f"Run 合同与状态的身份不一致：{run}")
     digest = hashlib.sha256((run / "contract.json").read_bytes()).hexdigest()
     if state["contract_sha256"] != digest:
-        raise WorkflowError(f"Run contract changed after opening: {run}")
+        raise WorkflowError(f"Run 打开后合同被改写：{run}")
     check_navigation(state, run / "state.json")
     checkpoints = read_checkpoints(run / "checkpoints.jsonl")
     ids = []
     for item in checkpoints:
         require_fields(item, ("schema_version", "id", "run_id", "timestamp", "kind", "summary", "result", "evidence_refs", "limitation"), run / "checkpoints.jsonl")
         if item["run_id"] != run.name or item["kind"] not in CHECKPOINT_KINDS:
-            raise WorkflowError(f"invalid checkpoint identity or kind: {run}")
+            raise WorkflowError(f"检查点身份或类型无效：{run}")
         if not isinstance(item["evidence_refs"], list) or not item["evidence_refs"]:
-            raise WorkflowError(f"checkpoint has no evidence refs: {run}")
+            raise WorkflowError(f"检查点没有证据引用：{run}")
         ids.append(item["id"])
     if len(ids) != len(set(ids)):
-        raise WorkflowError(f"duplicate checkpoint id: {run}")
+        raise WorkflowError(f"检查点 ID 重复：{run}")
     if state.get("checkpoint_count") != len(checkpoints):
-        raise WorkflowError(f"checkpoint_count mismatch: {run}")
+        raise WorkflowError(f"checkpoint_count 与实际记录数不一致：{run}")
     expected_last = ids[-1] if ids else None
     if state.get("last_checkpoint_id") != expected_last:
-        raise WorkflowError(f"last_checkpoint_id mismatch: {run}")
+        raise WorkflowError(f"last_checkpoint_id 与实际末条记录不一致：{run}")
     if state["status"] == "terminal":
         require_fields(result, ("schema_version", "status", "run_id", "verdict", "summary", "checkpoint_refs"), run / "result.json")
         if result["status"] != "complete" or result["run_id"] != run.name:
-            raise WorkflowError(f"invalid terminal result: {run}")
+            raise WorkflowError(f"终态结果无效：{run}")
         if result["checkpoint_refs"] != ids:
-            raise WorkflowError(f"terminal result checkpoint refs mismatch: {run}")
+            raise WorkflowError(f"终态结果引用的检查点与实际记录不一致：{run}")
     elif result.get("status") != "pending":
-        raise WorkflowError(f"active Run must have a pending result: {run}")
+        raise WorkflowError(f"活动 Run 的结果必须是 pending：{run}")
 
 
 def check_loop(loop):
     state = read_json(loop / "state.json")
     require_fields(state, ("schema_version", "kind", "id", "task_id", "status", "navigation"), loop / "state.json")
     if state["id"] != loop.name:
-        raise WorkflowError(f"Loop id does not match directory: {loop}")
+        raise WorkflowError(f"Loop ID 与目录名不一致：{loop}")
     if not (loop / "goal.md").is_file() or not (loop / "hypotheses.md").is_file():
-        raise WorkflowError(f"missing Loop goal or hypotheses: {loop}")
+        raise WorkflowError(f"Loop 缺少目标或假设文件：{loop}")
     check_navigation(state, loop / "state.json")
     for run in sorted((loop / "runs").glob("[0-9][0-9][0-9]_*")):
         check_run(run)
     active = state.get("active_run_id")
     if active and not (loop / "runs" / active).is_dir():
-        raise WorkflowError(f"active_run_id does not exist: {loop}")
+        raise WorkflowError(f"active_run_id 指向不存在的 Run：{loop}")
     if active and read_json(loop / "runs" / active / "state.json").get("status") != "active":
-        raise WorkflowError(f"active_run_id points to a terminal Run: {loop}")
+        raise WorkflowError(f"active_run_id 指向已经结束的 Run：{loop}")
 
 
 def check_task(task):
     record = read_json(task / "task.json")
     require_fields(record, ("schema_version", "kind", "id", "title", "objective", "status", "navigation"), task / "task.json")
     if record["id"] != task.name:
-        raise WorkflowError(f"Task id does not match directory: {task}")
+        raise WorkflowError(f"Task ID 与目录名不一致：{task}")
     for name in ("design-brief.md", "glossary.md", "risks.md", "decisions.md"):
         if not (task / "grill" / name).is_file():
-            raise WorkflowError(f"missing Grill file: {task / 'grill' / name}")
+            raise WorkflowError(f"缺少设计梳理文件：{task / 'grill' / name}")
     check_navigation(record, task / "task.json")
     loops = task / "loops"
     if loops.exists():
@@ -525,9 +550,9 @@ def check_task(task):
             check_loop(loop)
     active = record.get("active_loop_id")
     if active and not (loops / active).is_dir():
-        raise WorkflowError(f"active_loop_id does not exist: {task}")
+        raise WorkflowError(f"active_loop_id 指向不存在的 Loop：{task}")
     if active and read_json(loops / active / "state.json").get("status") != "active":
-        raise WorkflowError(f"active_loop_id points to a terminal Loop: {task}")
+        raise WorkflowError(f"active_loop_id 指向已经结束的 Loop：{task}")
 
 
 def cmd_check(args):
@@ -544,16 +569,18 @@ def cmd_check(args):
             for task in sorted(tasks.glob("[0-9][0-9][0-9]_*")):
                 check_task(task)
     else:
-        raise WorkflowError(f"cannot identify record type: {target}")
-    print("ok")
+        raise WorkflowError(f"无法识别记录类型：{target}")
+    print("通过")
 
 
 def build_parser():
-    parser = argparse.ArgumentParser(description="Repo-local Task/Loop/Run workflow")
-    parser.add_argument("--root", type=Path, default=project_root())
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    parser = ChineseArgumentParser(description="仓库内置的 Task/Loop/Run 工作流")
+    parser.add_argument("--root", type=Path, default=project_root(), help="项目根目录")
+    subparsers = parser.add_subparsers(
+        dest="command", required=True, parser_class=ChineseArgumentParser
+    )
 
-    command = subparsers.add_parser("open-task")
+    command = subparsers.add_parser("open-task", help="打开一个长期 Task")
     command.add_argument("slug")
     command.add_argument("--title", required=True)
     command.add_argument("--objective", required=True)
@@ -561,7 +588,7 @@ def build_parser():
     command.add_argument("--non-goal", action="append", default=[])
     command.set_defaults(func=cmd_open_task)
 
-    command = subparsers.add_parser("open-loop")
+    command = subparsers.add_parser("open-loop", help="打开一个可证伪 Loop")
     command.add_argument("task")
     command.add_argument("slug")
     command.add_argument("--goal", required=True)
@@ -570,7 +597,7 @@ def build_parser():
     command.add_argument("--falsification", action="append", required=True)
     command.set_defaults(func=cmd_open_loop)
 
-    command = subparsers.add_parser("open-run")
+    command = subparsers.add_parser("open-run", help="打开一次有边界的 Run")
     command.add_argument("loop")
     command.add_argument("slug")
     command.add_argument("--objective", required=True)
@@ -578,7 +605,7 @@ def build_parser():
     command.add_argument("--allowed-change", action="append", default=[])
     command.set_defaults(func=cmd_open_run)
 
-    command = subparsers.add_parser("set-next-action")
+    command = subparsers.add_parser("set-next-action", help="选择并保存一个下一步")
     command.add_argument("record")
     command.add_argument("--kind", choices=ACTION_KINDS, required=True)
     command.add_argument("--action", required=True)
@@ -588,13 +615,13 @@ def build_parser():
     command.add_argument("--source-ref", action="append", required=True)
     command.set_defaults(func=cmd_set_next_action)
 
-    command = subparsers.add_parser("block")
+    command = subparsers.add_parser("block", help="记录当前外部阻塞")
     command.add_argument("record")
     command.add_argument("--reason", required=True)
     command.add_argument("--unblock-when", required=True)
     command.set_defaults(func=cmd_block)
 
-    command = subparsers.add_parser("checkpoint")
+    command = subparsers.add_parser("checkpoint", help="追加一个证据检查点")
     command.add_argument("run")
     command.add_argument("--kind", choices=CHECKPOINT_KINDS, required=True)
     command.add_argument("--summary", required=True)
@@ -604,25 +631,25 @@ def build_parser():
     command.add_argument("--supersedes")
     command.set_defaults(func=cmd_checkpoint)
 
-    command = subparsers.add_parser("close-run")
+    command = subparsers.add_parser("close-run", help="关闭当前 Run")
     command.add_argument("run")
     command.add_argument("--verdict", choices=("passed", "failed", "blocked", "partial"), required=True)
     command.add_argument("--summary", required=True)
     command.set_defaults(func=cmd_close_run)
 
-    command = subparsers.add_parser("close-loop")
+    command = subparsers.add_parser("close-loop", help="关闭当前 Loop")
     command.add_argument("loop")
     command.add_argument("--verdict", choices=("confirmed", "falsified", "blocked", "abandoned"), required=True)
     command.add_argument("--summary", required=True)
     command.set_defaults(func=cmd_close_loop)
 
-    command = subparsers.add_parser("close-task")
+    command = subparsers.add_parser("close-task", help="关闭当前 Task")
     command.add_argument("task")
     command.add_argument("--verdict", choices=("completed", "blocked", "abandoned"), required=True)
     command.add_argument("--summary", required=True)
     command.set_defaults(func=cmd_close_task)
 
-    command = subparsers.add_parser("check")
+    command = subparsers.add_parser("check", help="校验记录的恢复结构")
     command.add_argument("path", nargs="?")
     command.set_defaults(func=cmd_check)
     return parser
@@ -635,7 +662,7 @@ def main():
     try:
         args.func(args)
     except WorkflowError as exc:
-        parser.exit(2, f"error: {exc}\n")
+        parser.exit(2, f"错误：{exc}\n")
 
 
 if __name__ == "__main__":

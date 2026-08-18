@@ -1,81 +1,81 @@
 ---
 name: task-loop-run
-description: Manage durable work as Task, Loop, and Run records inside the repository. Use when opening or resuming a long-running goal, splitting a goal into a falsifiable direction, starting a bounded execution attempt, recovering work across sessions, or closing a Run, Loop, or Task. Do not use for a trivial one-step request that needs no recovery or handoff.
+description: 在仓库内用 Task、Loop 和 Run 记录管理持久工作。当需要打开或恢复长期目标、把目标拆成可证伪方向、开始一次有边界的执行、跨会话恢复工作，或关闭 Run、Loop 与 Task 时使用。无需恢复或交接的一步请求不要使用。
 ---
 
-# Task Loop Run
+# Task / Loop / Run
 
-Use one compact hierarchy:
+使用一个紧凑层级：
 
-- Task manages a durable objective.
-- Loop manages one falsifiable direction or stage.
-- Run manages one bounded execution result.
-- Checkpoints record facts; navigation records the selected next action.
+- Task 管理持久目标。
+- Loop 管理一个可证伪方向或阶段。
+- Run 管理一次有边界的执行结果。
+- 检查点记录事实，导航状态记录选中的下一步。
 
-## Start or resume
+## 打开或恢复
 
-1. Read `PROJECT.md`, then inspect `tasks/` for a matching active Task.
-2. Resume the existing record when its objective matches. Do not create a parallel Task for the same objective.
-3. Open a Task only for work likely to span several actions, hypotheses, sessions, or handoffs:
+1. 读取 `PROJECT.md`，再检查 `tasks/` 中是否已有目标相同的活动 Task。
+2. 目标相同时恢复已有记录，不要为同一目标创建并行 Task。
+3. 只有工作可能跨越多个动作、假设、会话或交接时才打开 Task：
 
    ```bash
    python .agents/skills/task-loop-run/scripts/workflow.py open-task <slug> \
-     --title "<title>" --objective "<objective>"
+     --title "<标题>" --objective "<目标>"
    ```
 
-4. If the objective is still foggy, use `design-grill` before opening a Loop.
-5. Open a Loop only after one direction can be stated as a falsifiable hypothesis:
+4. 目标仍然模糊时，先使用 `design-grill`，不要直接打开 Loop。
+5. 只有一个方向已经能够表述为可证伪假设时才打开 Loop：
 
    ```bash
    python .agents/skills/task-loop-run/scripts/workflow.py open-loop tasks/<task> <slug> \
-     --goal "<bounded goal>" --hypothesis "<falsifiable hypothesis>" \
-     --acceptance "<confirming evidence>" --falsification "<disproving evidence>"
+     --goal "<有边界的目标>" --hypothesis "<可证伪假设>" \
+     --acceptance "<支持假设的证据>" --falsification "<推翻假设的证据>"
    ```
 
-6. Open a Run for one concrete execution with a frozen objective:
+6. 为一次具体执行打开 Run，并冻结它的目标：
 
    ```bash
    python .agents/skills/task-loop-run/scripts/workflow.py open-run tasks/<task>/loops/<loop> <slug> \
-     --objective "<one execution objective>" --acceptance "<observable pass condition>"
+     --objective "<本次执行目标>" --acceptance "<可观察的通过条件>"
    ```
 
-The command prints the created path. Treat `contract.json` as immutable after the Run starts.
+命令会输出新建路径。Run 开始后，把 `contract.json` 视为不可变合同。
 
-## Work and close
+## 执行与关闭
 
-1. Execute only the active Run contract.
-2. Use `evidence-checkpoint` when a result changes the route, proves or falsifies a gate, creates a recovery boundary, or precedes handoff.
-3. Use `next-action` whenever a record opens, resumes, changes direction, becomes blocked, or receives a decision-changing result.
-4. Close a Run with a bounded verdict:
+1. 只执行当前 Run 合同规定的内容。
+2. 当结果改变路线、证明或证伪条件、形成恢复边界或即将交接时，使用 `evidence-checkpoint`。
+3. 记录打开、恢复、改变方向、遇到阻塞或收到改变决策的结果时，使用 `next-action`。
+4. 用有边界的结论关闭 Run：
 
    ```bash
    python .agents/skills/task-loop-run/scripts/workflow.py close-run <run-path> \
-     --verdict passed --summary "<result and limitations>"
+     --verdict passed --summary "<结果与限制>"
    ```
 
-5. Close or pivot the Loop only from Run results. Close the Task only when its acceptance boundary is met or the user explicitly abandons it:
+5. 只根据 Run 结果关闭或转向 Loop。只有达到验收边界或用户明确放弃时才关闭 Task：
 
    ```bash
    python .agents/skills/task-loop-run/scripts/workflow.py close-loop <loop-path> \
-     --verdict confirmed --summary "<decision>"
+     --verdict confirmed --summary "<决策>"
    python .agents/skills/task-loop-run/scripts/workflow.py close-task <task-path> \
-     --verdict completed --summary "<outcome>"
+     --verdict completed --summary "<最终结果>"
    ```
 
-6. Validate recovery structure before handoff or closeout:
+6. 交接或收尾前校验恢复结构：
 
    ```bash
    python .agents/skills/task-loop-run/scripts/workflow.py check
    ```
 
-## Record contract
+## 记录契约
 
-- `tasks/<task>/task.json`: objective, lifecycle, outcome, and Task navigation.
-- `tasks/<task>/grill/`: design brief, task-local terms, risks, and decisions.
-- `loops/<loop>/goal.md`, `hypotheses.md`, `state.json`: frozen direction and Loop navigation.
-- `runs/<run>/contract.json`: immutable execution contract.
-- `runs/<run>/state.json`: mutable recovery state and Run navigation.
-- `runs/<run>/checkpoints.jsonl`: append-only decision-relevant evidence.
-- `runs/<run>/result.json`: proposed terminal result.
+- `tasks/<task>/task.json`：目标、生命周期、最终结果和 Task 导航。
+- `tasks/<task>/grill/`：设计简报、Task 术语、风险和决策。
+- `loops/<loop>/goal.md`、`hypotheses.md`、`state.json`：冻结的方向和 Loop 导航。
+- `runs/<run>/contract.json`：不可变的执行合同。
+- `runs/<run>/state.json`：可变恢复状态和 Run 导航。
+- `runs/<run>/checkpoints.jsonl`：只追加的决策相关证据。
+- `runs/<run>/result.json`：待确认的终态结果。
 
-Do not create generated status views, session transcripts, mandatory empty evidence files, signatures, promotion states, plugin locks, or marketplace metadata.
+不要创建生成状态视图、会话流水、强制空证据文件、签名、晋升状态、插件锁或插件市场元数据。

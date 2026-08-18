@@ -1,4 +1,4 @@
 interface:
-  display_name: "Evidence Checkpoint"
-  short_description: "Record evidence that changes decisions or enables recovery"
-  default_prompt: "Use $evidence-checkpoint to record this decision-changing result."
+  display_name: "证据检查点"
+  short_description: "记录会改变决策、支撑结论或帮助恢复与交接的关键证据"
+  default_prompt: "使用 $evidence-checkpoint 记录这项会改变决策的结果及其证据边界。"

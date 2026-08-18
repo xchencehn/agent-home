@@ -1,11 +1,11 @@
 # Agent Home
 
 一个可以直接克隆使用的 Agent 项目模板。仓库本身就是 Agent Home：根规则、项目说明、Task/Loop/Run
-工作协议和可复用 Skills 都随 Git 一起分发，不需要安装插件。
+工作协议和可复用 Skill（技能）都随 Git 一起分发，不需要安装插件。
 
 ## 开始使用
 
-clone 时直接指定项目目录名：
+克隆时直接指定项目目录名：
 
 ```bash
 git clone https://github.com/xchencehn/agent-home.git my-project
@@ -15,7 +15,7 @@ codex
 claude
 ```
 
-也可以先 clone 再改目录名：
+也可以先克隆再改目录名：
 
 ```bash
 git clone https://github.com/xchencehn/agent-home.git
@@ -31,7 +31,7 @@ codex
 ```
 
 首次会话会使用 `bootstrap-project` 初始化 `PROJECT.md`。Codex 会从仓库根
-`.agents/skills/` 自动发现 Skills；Claude Code 从 `.claude/skills/` 的薄 wrapper 转读同一份工作流。
+`.agents/skills/` 自动发现 Skill；Claude Code 从 `.claude/skills/` 的薄发现包装层转读同一份工作流。
 
 <!-- project-summary:start -->
 ## 当前项目
@@ -41,14 +41,14 @@ codex
 
 ## 核心工作方法
 
-简单请求直接完成。需要跨多步、多轮验证或跨会话恢复时，Agent 自动使用以下 Skills：
+简单请求直接完成。需要跨多步、多轮验证或跨会话恢复时，Agent 自动使用以下 Skill：
 
-| Skill | 职责 |
+| Skill（技能） | 职责 |
 | --- | --- |
-| `bootstrap-project` | 把刚 clone 或改名的模板初始化成具体项目 |
+| `bootstrap-project` | 把刚克隆或改名的模板初始化成具体项目 |
 | `task-loop-run` | Task 管目标，Loop 管可证伪方向，Run 管一次执行结果 |
 | `design-grill` | 在实施前澄清范围、术语、风险、验收、未知项和转向条件 |
-| `next-action` | 根据 destination、frontier、blockers 和 fog 每轮只选择一个下一步 |
+| `next-action` | 根据目标、行动前沿、阻塞和信息迷雾，每轮只选择一个下一步 |
 | `evidence-checkpoint` | 只记录会改变路线、支撑结论或用于恢复交接的关键证据 |
 
 也可以在提示词中显式调用，例如：
@@ -90,15 +90,17 @@ python .agents/skills/task-loop-run/scripts/workflow.py check
 ```
 
 Run 打开后，`contract.json` 不再改写；事实追加到 `checkpoints.jsonl`，当前恢复位置在 `state.json`，
-最终结果进入 `result.json`。没有生成状态页、插件锁、marketplace、安装缓存或强制验收状态机。
+最终结果进入 `result.json`。没有生成状态页、插件锁、插件市场、安装缓存或强制验收状态机。
+
+完整设计思想见 [Home Engineering：把仓库变成 Agent 的工作家园](docs/home-engineering.md)。
 
 ## 仓库结构
 
 - `AGENTS.md`：Codex 与其他兼容 Agent 的根规则。
 - `CLAUDE.md`：Claude Code 根入口，导入同一份 `AGENTS.md`。
 - `PROJECT.md`：项目身份、目标、范围与常用命令。
-- `.agents/skills/`：仓库级 Skills，也是工作流的唯一源码。
-- `.claude/skills/`：Claude Code 的薄发现 wrapper，不复制工作流。
+- `.agents/skills/`：仓库级 Skill，也是工作流的唯一源码。
+- `.claude/skills/`：Claude Code 的薄发现包装层，不复制工作流。
 - `tasks/`：按需生成的跨会话工作记录。
 - `docs/`：面向使用者的设计和说明。
 - `reports/`：需要长期保留、且有证据支持的工程结论。
@@ -110,9 +112,9 @@ Run 打开后，`contract.json` 不再改写；事实追加到 `checkpoints.json
 python -m unittest discover -s tests -v
 ```
 
-普通 clone 会保留本模板为 `origin`。首次初始化不会删除或改写 remote，也不会自动 push。准备发布到
-自己的仓库时，再明确要求 Agent 配置目标 remote。
+普通克隆会保留本模板为 `origin`。首次初始化不会删除或改写远端，也不会自动推送。准备发布到自己的
+仓库时，再明确要求 Agent 配置目标远端。
 
-## License
+## 许可证
 
-本项目使用 [MIT License](LICENSE)。
+本项目使用 [MIT License](LICENSE)。另提供[简体中文参考译文](LICENSE.zh-CN)，法律效力以英文原文为准。

@@ -1,4 +1,4 @@
 interface:
-  display_name: "Bootstrap Project"
-  short_description: "Initialize a renamed workspace template"
-  default_prompt: "Use $bootstrap-project to initialize this workspace from the template."
+  display_name: "项目初始化"
+  short_description: "把刚克隆或改名的 Agent Home 模板初始化为具体项目"
+  default_prompt: "使用 $bootstrap-project 把这个模板初始化成我描述的项目。"

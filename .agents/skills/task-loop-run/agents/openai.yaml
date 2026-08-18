@@ -1,4 +1,4 @@
 interface:
-  display_name: "Task Loop Run"
-  short_description: "Manage durable goals, hypotheses, and execution results"
-  default_prompt: "Use $task-loop-run to open or resume the smallest useful Task, Loop, or Run."
+  display_name: "任务循环运行"
+  short_description: "用 Task、Loop 与 Run 管理长期目标、可证伪方向和执行结果"
+  default_prompt: "使用 $task-loop-run 打开或恢复当前最小且有用的 Task、Loop 或 Run。"

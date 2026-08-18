@@ -1,30 +1,32 @@
 ---
 name: evidence-checkpoint
-description: Append and validate decision-relevant evidence for an active Run. Use when evidence changes the next action, proves or falsifies an acceptance gate, records an important source or environment boundary, supports recovery, or precedes handoff or closeout. Do not record ordinary reads, typo retries, or repeated commands with no new conclusion.
+description: 为当前 Run 追加并校验会影响决策的证据。当证据改变下一步、证明或证伪验收条件、记录重要源码或环境边界、支持恢复，或即将交接与收尾时使用。普通读取、拼写重试和没有产生新结论的重复命令不要记录。
 ---
 
-# Evidence Checkpoint
+# 证据检查点
 
-Record facts only when they change a decision, support a verdict, or are required for recovery.
+只有事实会改变决策、支撑结论或用于恢复时才记录。
 
-## Record a milestone
+## 记录里程碑
 
-1. Read the immutable `contract.json`, current `state.json`, and existing `checkpoints.jsonl`.
-2. Keep full raw output in an appropriate project log or artifact. Put only the bounded conclusion and references in the checkpoint.
-3. Append one checkpoint:
+1. 读取不可变的 `contract.json`、当前 `state.json` 和已有 `checkpoints.jsonl`。
+2. 完整原始输出留在合适的项目日志或产物中；检查点只保存有边界的结论和来源指针。
+3. 追加一个检查点：
 
    ```bash
    python .agents/skills/task-loop-run/scripts/workflow.py checkpoint <run-path> \
      --kind validation \
-     --summary "<bounded conclusion>" \
-     --result "<observed result>" \
-     --evidence-ref "<artifact, command, test, commit, or source ref>" \
-     --limitation "<what this does not prove>"
+     --summary "<有边界的结论>" \
+     --result "<实际观察结果>" \
+     --evidence-ref "<产物、命令、测试、提交或源码引用>" \
+     --limitation "<这份证据不能证明什么>"
    ```
 
-4. Recompute the Run `next_action` after every decision-changing checkpoint.
-5. Run `workflow.py check <run-path>` before handoff or closeout.
+4. 每个改变决策的检查点写入后，都重新计算 Run 的 `next_action`。
+5. 交接或收尾前运行 `workflow.py check <run-path>`。
 
-Checkpoint kinds are `observation`, `decision`, `validation`, `blocker`, and `handoff`. Use stable generated IDs and explicit UTC timestamps. Never rewrite an appended checkpoint; append a correcting checkpoint that names the superseded ID.
+检查点类型包括 `observation`、`decision`、`validation`、`blocker` 和 `handoff`。使用稳定生成的 ID
+和明确的 UTC 时间戳。不要改写已经追加的检查点；另行追加纠正检查点，并指出被替代的 ID。
 
-Do not make a failed command disappear, confuse command success with claim acceptance, or claim performance without a same-case comparison. The executing session may propose `result.json`; any independent acceptance required by the project remains a separate human or top-level-session action.
+不要隐藏失败命令，不要把命令成功等同于结论被接受，也不要在缺少同案比较时宣称性能收益。执行会话可以
+提出 `result.json`；若项目要求独立验收，仍应由人或另一个可区分的顶层会话完成。

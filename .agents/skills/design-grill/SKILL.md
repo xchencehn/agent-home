@@ -1,38 +1,40 @@
 ---
 name: design-grill
-description: Shape a rough Task or proposed Loop into a clear, bounded, testable direction. Use when intent, scope, terminology, alternatives, acceptance, risks, unknowns, or pivot conditions remain unresolved before implementation. Stop immediately when the direction is already clear; do not invoke for routine execution.
+description: 把粗略的 Task 或待选 Loop 塑造成边界清晰、可以验证的方向。实施前若意图、范围、术语、候选方案、验收、风险、未知项或转向条件仍未解决时使用。方向已经清晰时立即退出；日常执行不要使用。
 ---
 
-# Design Grill
+# 设计梳理
 
-Turn fog into one precise direction. Do not implement while grilling.
+把信息迷雾收敛成一个精确方向。梳理期间不要实施。
 
-## Task-level grill
+## Task 级梳理
 
-1. Read `PROJECT.md`, the active `task.json`, and existing `grill/` files.
-2. Separate four things explicitly:
+1. 读取 `PROJECT.md`、当前 `task.json` 和已有 `grill/` 文件。
+2. 明确分开四类信息：
 
-   - known facts with source pointers;
-   - precise questions that can be answered now;
-   - fog whose question cannot yet be phrased;
-   - non-goals that are consciously excluded.
+   - 带来源指针的已知事实；
+   - 当前已经能够回答的精确问题；
+   - 还无法表述成精确问题的迷雾；
+   - 主动排除的非目标。
 
-3. Update only the smallest useful files:
+3. 只更新最少的必要文件：
 
-   - `grill/design-brief.md`: target, context, scope, non-goals, alternatives, acceptance, first direction, open questions;
-   - `grill/glossary.md`: task-specific terms only;
-   - `grill/risks.md`: risk, consequence, probe, and pivot condition;
-   - `grill/decisions.md`: lightweight decisions and their evidence.
+   - `grill/design-brief.md`：目标、上下文、范围、非目标、候选方案、验收、首个方向和开放问题；
+   - `grill/glossary.md`：只记录 Task 特有术语；
+   - `grill/risks.md`：风险、后果、探针和转向条件；
+   - `grill/decisions.md`：轻量决策及其证据。
 
-4. Ask the user only for intent or trade-off choices that repository evidence cannot answer.
-5. Stop when one Loop direction has a falsifiable hypothesis, acceptance evidence, falsification evidence, allowed change surface, and pivot condition.
+4. 只有仓库证据无法回答的意图或取舍才询问用户。
+5. 当一个 Loop 方向已经具备可证伪假设、验收证据、证伪证据、允许改变的范围和转向条件时停止。
 
-## Loop shaping
+## Loop 级塑形
 
-Put Loop-level shaping directly in `goal.md` and `hypotheses.md`. Point back to relevant Task grill facts, risks, and decisions. Do not create `loops/<loop>/grill/`.
+把 Loop 级结果直接写入 `goal.md` 与 `hypotheses.md`，并指向相关的 Task 事实、风险和决策。不要创建
+`loops/<loop>/grill/`。
 
-## Exit
+## 退出
 
-Use `next-action` to choose one bounded clarification, research action, reversible probe, decision, or execution step. Never return “继续研究” or “继续优化”; name the uncertainty reduced and the checkable completion condition.
+使用 `next-action` 选择一个有边界的澄清、调研、可逆探针、决策或执行步骤。不要返回“继续研究”或
+“继续优化”；必须说明要减少的未知项和可检查的完成条件。
 
-Keep raw commands and logs out of Grill files. Record execution evidence through `evidence-checkpoint` after a Run exists.
+不要把原始命令和日志放进 Grill 文件。Run 创建后，通过 `evidence-checkpoint` 记录执行证据。

@@ -1,40 +1,35 @@
 ---
 name: bootstrap-project
-description: Initialize a freshly cloned or renamed Agent Home repository template into a concrete project. Use when PROJECT.md still contains agent-home-template:uninitialized, when the user asks to initialize or repurpose the template, or before the first substantive change in a fresh clone. Do not use for routine work after the marker has been removed.
+description: 把刚克隆或改名的 Agent Home 仓库模板初始化成具体项目。当 `PROJECT.md` 仍含 `agent-home-template:uninitialized`、用户要求初始化或改造模板，或全新克隆尚未开始第一次实质修改时使用。标记删除后处理日常工作时不要使用。
 ---
 
-# Bootstrap Project
+# 初始化项目
 
-Turn the fresh template into the user's project without requiring an installer or separate bootstrap command.
+无需安装程序或单独的引导命令，直接把新模板变成用户的项目。
 
-## Workflow
+## 工作流程
 
-1. Resolve the Git root and read `AGENTS.md`, `PROJECT.md`, `README.md`, `git status --short --branch`, and
-   `git remote -v`.
-2. Use the root directory basename as the proposed project name. Do not rename the directory yourself.
-3. Derive the goal and initial scope from the user's request. If the request does not reveal the goal, ask one concise
-   question and stop initialization until answered.
-4. Update `PROJECT.md` with the project name, goal, current scope, non-goals, discovered validation commands, and stable
-   constraints. Remove the `agent-home-template:uninitialized` marker.
-5. Replace only the block between `project-summary:start` and `project-summary:end` in `README.md` with the project
-   name, purpose, and shortest useful start command. Keep the reusable Agent workspace explanation unless the user asks
-   to remove it.
-6. Add project-specific rules to `AGENTS.md` only when they are already known and always applicable. Put conditional
-   workflows in a new repo-local Skill instead of enlarging the root rules.
-7. Keep `.agents/skills/` as the workflow source of truth. Keep `.claude/skills/bootstrap-project/SKILL.md` as a
-   discovery-only wrapper that points back to this file; do not copy the workflow into it.
-8. Run `python -m unittest discover -s tests -v`, plus any project-native check discovered during initialization.
-9. If the same request begins a long-running or multi-stage goal, hand off to `task-loop-run` after initialization.
-10. Report the initialized identity, remaining unknowns, validation result, and current remote ownership.
+1. 确定 Git 根目录，读取 `AGENTS.md`、`PROJECT.md`、`README.md`，并检查
+   `git status --short --branch` 与 `git remote -v`。
+2. 使用根目录名称作为项目名称候选，不要自行修改目录名。
+3. 从用户请求中提取目标和初始范围。若请求没有提供目标，只问一个必要问题；得到回答前暂停初始化。
+4. 在 `PROJECT.md` 中写入项目名称、目标、当前范围、非目标、已发现的验证命令和稳定约束，并删除
+   `agent-home-template:uninitialized` 标记。
+5. 只替换 `README.md` 中 `project-summary:start` 与 `project-summary:end` 之间的内容，写入项目名称、
+   用途和最短启动命令。除非用户要求删除，否则保留可复用的 Agent 工作空间说明。
+6. 只有已经明确且始终适用的项目规则才写入 `AGENTS.md`。条件性工作流应写成新的仓库级 Skill，不要
+   持续扩大根规则。
+7. 以 `.agents/skills/` 作为工作流唯一真值。`.claude/skills/bootstrap-project/SKILL.md` 只作为
+   Claude Code 的发现包装层，指向本文件，不复制工作流。
+8. 运行 `python -m unittest discover -s tests -v`，再运行初始化过程中发现的项目原生检查。
+9. 若同一请求开始了长期或多阶段目标，初始化完成后转入 `task-loop-run`。
+10. 报告初始化后的项目身份、剩余未知项、验证结果和当前远端归属。
 
-## Boundaries
+## 边界
 
-- Do not create Task, Loop, or Run merely because the template was initialized. Use `task-loop-run` only when the
-  substantive request needs durable recovery, hypotheses, or several bounded execution attempts.
-- Do not create session logs, plugin manifests, marketplace entries, install caches, generated status views, or
-  mandatory governance records.
-- Do not delete or rewrite Git history, remove or replace a remote, create an external repository, push, or publish
-  without explicit user authorization.
-- Do not invent build or test commands. Record unknown commands as unknown until the repository supplies evidence.
-- Do not copy machine-specific paths, credentials, personal settings, or the template's historical implementation into
-  the new project.
+- 不要仅因模板完成初始化就创建 Task、Loop 或 Run。只有实质请求需要持久恢复、假设验证或多次有边界
+  的执行时才使用 `task-loop-run`。
+- 不创建会话日志、插件清单、marketplace 条目、安装缓存、生成状态视图或强制治理记录。
+- 未经用户明确授权，不删除或改写 Git 历史，不删除或替换远端，不创建外部仓库，不 push 或发布。
+- 不臆造构建或测试命令。仓库没有提供证据前，把未知命令明确记为未知。
+- 不把机器专属路径、凭据、个人设置或模板的历史实现复制进新项目。

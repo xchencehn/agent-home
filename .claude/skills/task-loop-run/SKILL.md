@@ -1,9 +1,9 @@
 ---
 name: task-loop-run
-description: Manage durable work as Task, Loop, and Run records. Use for long-running goals, falsifiable directions, bounded execution attempts, cross-session recovery, and lifecycle closeout.
+description: 用 Task、Loop 和 Run 管理长期目标、可证伪方向、有边界的执行尝试、跨会话恢复与生命周期关闭。
 ---
 
-# Task Loop Run
+# Task / Loop / Run
 
-Read `.agents/skills/task-loop-run/SKILL.md` completely and follow it as the sole workflow.
-This file is only the Claude Code discovery wrapper; do not maintain a second implementation here.
+完整读取 `.agents/skills/task-loop-run/SKILL.md`，并把它作为唯一工作流执行。
+本文件只是 Claude Code 的发现包装层，不要在这里维护第二份实现。

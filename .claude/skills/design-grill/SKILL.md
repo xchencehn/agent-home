@@ -1,9 +1,9 @@
 ---
 name: design-grill
-description: Shape unresolved intent, scope, alternatives, acceptance, risks, or fog into a bounded and testable direction before implementation.
+description: 实施前把尚未明确的意图、范围、方案、验收、风险或迷雾整理成有边界、可以验证的方向。
 ---
 
-# Design Grill
+# 设计梳理
 
-Read `.agents/skills/design-grill/SKILL.md` completely and follow it as the sole workflow.
-This file is only the Claude Code discovery wrapper; do not maintain a second implementation here.
+完整读取 `.agents/skills/design-grill/SKILL.md`，并把它作为唯一工作流执行。
+本文件只是 Claude Code 的发现包装层，不要在这里维护第二份实现。
