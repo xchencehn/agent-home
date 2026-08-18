@@ -1,0 +1,4 @@
+interface:
+  display_name: "Bootstrap Project"
+  short_description: "Initialize a renamed workspace template"
+  default_prompt: "Use $bootstrap-project to initialize this workspace from the template."
