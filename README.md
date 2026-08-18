@@ -92,7 +92,7 @@ python .agents/skills/task-loop-run/scripts/workflow.py check
 Run 打开后，`contract.json` 不再改写；事实追加到 `checkpoints.jsonl`，当前恢复位置在 `state.json`，
 最终结果进入 `result.json`。没有生成状态页、插件锁、插件市场、安装缓存或强制验收状态机。
 
-完整设计思想见 [Home Engineering：把仓库变成 Agent 的工作家园](docs/home-engineering.md)。
+完整设计思想见 [Agent Home：项目自有的持久工作环境](docs/home-engineering.md)。
 
 ## 仓库结构
 

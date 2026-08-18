@@ -102,6 +102,18 @@ class TemplateContractTest(unittest.TestCase):
         help_text = self.run_workflow(ROOT, "--help")
         self.assertIn("仓库内置的 Task/Loop/Run 工作流", help_text)
 
+    def test_home_engineering_doc_preserves_the_vision_and_stays_concise(self):
+        document = (ROOT / "docs/home-engineering.md").read_text()
+        for statement in (
+            "由项目或组织拥有、独立于具体模型与 Harness 的持久工作环境",
+            "模型提供智力，Harness 提供行动能力，Home 提供项目工作能力",
+            "Home 保存七类项目能力",
+            "它们不等于 Agent Home 本身",
+            "Agent 可以更换，Harness 可以升级，Home 持续积累",
+        ):
+            self.assertIn(statement, document)
+        self.assertLessEqual(len(document.splitlines()), 200)
+
     def test_task_loop_run_round_trip_and_contract_immutability(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
