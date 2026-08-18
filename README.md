@@ -52,3 +52,7 @@ codex
 
 普通 clone 会保留模板仓库为 `origin`。首次初始化不会擅自删除或改写 remote，也不会自动 push；准备把
 项目发布到新仓库时，再明确要求 Agent 配置目标 remote。
+
+## License
+
+本项目使用 [MIT License](LICENSE)。
