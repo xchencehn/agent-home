@@ -1,0 +1,4 @@
+interface:
+  display_name: "Evidence Checkpoint"
+  short_description: "Record evidence that changes decisions or enables recovery"
+  default_prompt: "Use $evidence-checkpoint to record this decision-changing result."

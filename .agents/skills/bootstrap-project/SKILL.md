@@ -24,11 +24,15 @@ Turn the fresh template into the user's project without requiring an installer o
 7. Keep `.agents/skills/` as the workflow source of truth. Keep `.claude/skills/bootstrap-project/SKILL.md` as a
    discovery-only wrapper that points back to this file; do not copy the workflow into it.
 8. Run `python -m unittest discover -s tests -v`, plus any project-native check discovered during initialization.
-9. Report the initialized identity, remaining unknowns, validation result, and current remote ownership.
+9. If the same request begins a long-running or multi-stage goal, hand off to `task-loop-run` after initialization.
+10. Report the initialized identity, remaining unknowns, validation result, and current remote ownership.
 
 ## Boundaries
 
-- Do not create Task, Loop, Run, session-log, state-machine, plugin manifest, marketplace entry, or install cache.
+- Do not create Task, Loop, or Run merely because the template was initialized. Use `task-loop-run` only when the
+  substantive request needs durable recovery, hypotheses, or several bounded execution attempts.
+- Do not create session logs, plugin manifests, marketplace entries, install caches, generated status views, or
+  mandatory governance records.
 - Do not delete or rewrite Git history, remove or replace a remote, create an external repository, push, or publish
   without explicit user authorization.
 - Do not invent build or test commands. Record unknown commands as unknown until the repository supplies evidence.

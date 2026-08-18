@@ -1,0 +1,4 @@
+interface:
+  display_name: "Next Action"
+  short_description: "Choose one precise action from frontier, blockers, and fog"
+  default_prompt: "Use $next-action to recompute one precise executable next action."

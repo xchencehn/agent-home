@@ -1,0 +1,4 @@
+interface:
+  display_name: "Design Grill"
+  short_description: "Shape rough intent into a bounded testable direction"
+  default_prompt: "Use $design-grill to clarify this idea before implementation."

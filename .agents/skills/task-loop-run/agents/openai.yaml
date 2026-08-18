@@ -1,0 +1,4 @@
+interface:
+  display_name: "Task Loop Run"
+  short_description: "Manage durable goals, hypotheses, and execution results"
+  default_prompt: "Use $task-loop-run to open or resume the smallest useful Task, Loop, or Run."
