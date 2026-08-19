@@ -151,6 +151,18 @@ class TemplateContractTest(unittest.TestCase):
             self.assertIn(statement, document)
         self.assertLessEqual(len(document.splitlines()), 200)
 
+    def test_terminology_rule_is_always_in_force(self):
+        rules = (ROOT / "AGENTS.md").read_text()
+        self.assertIn("## 术语（全局强制，任何时候都适用）", rules)
+        for statement in (
+            "使用标准术语，不造黑话",
+            "以教科书、官方文档、",
+            "不因场合非正式而放宽",
+            "明确标注为自定义命名",
+        ):
+            self.assertIn(statement, rules)
+        self.assertLess(rules.index("## 术语"), rules.index("## 启动顺序"))
+
     def test_code_workspace_is_ignored_and_documented(self):
         self.assertIn("/.code/", (ROOT / ".gitignore").read_text())
         rules = (ROOT / "AGENTS.md").read_text()
