@@ -21,9 +21,11 @@ description: 把刚克隆或改名的 Agent Home 仓库模板初始化成具体�
    持续扩大根规则。
 7. 以 `.agents/skills/` 作为工作流唯一真值。`.claude/skills/bootstrap-project/SKILL.md` 只作为
    Claude Code 的发现包装层，指向本文件，不复制工作流。
-8. 运行 `python -m unittest discover -s tests -v`，再运行初始化过程中发现的项目原生检查。
-9. 若同一请求开始了长期或多阶段目标，初始化完成后转入 `task-loop-run`。
-10. 报告初始化后的项目身份、剩余未知项、验证结果和当前远端归属。
+8. 用户已经指明目标代码仓时，用 `add-repo` 把它放进 `.code/`，不要复制源码进本仓，也不要在本仓
+   提交代码仓的文件。目标代码仓尚未确定时不要创建 `.code/`。
+9. 运行 `python -m unittest discover -s tests -v`，再运行初始化过程中发现的项目原生检查。
+10. 若同一请求开始了长期或多阶段目标，初始化完成后转入 `task-loop-run`。
+11. 报告初始化后的项目身份、剩余未知项、验证结果和当前远端归属。
 
 ## 边界
 

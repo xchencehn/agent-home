@@ -17,6 +17,7 @@ Task/Loop/Run 工作协议。
 - `PROJECT.md` 保存项目身份、目标、范围、约束和常用命令，不保存逐次工作状态。
 - `.agents/skills/` 保存按需加载的领域工作流。Skill 的触发条件写在 `description` 中。
 - `tasks/` 保存按需创建的 Task/Loop/Run 恢复真值；不是每个请求都要创建 Task。
+- `.code/` 保存被操作的目标代码仓；本仓忽略它，代码由各代码仓自己提交管理。
 - `docs/` 保存面向使用者的设计和说明。
 - `reports/` 只保存跨会话仍有价值、且有源码、测试或原始产物支撑的结论。
 - `tests/` 保存机器可复验的项目判据。
@@ -41,6 +42,31 @@ Task/Loop/Run 工作协议。
 - 不生成 `status.md`、会话日志、强制签名、晋升状态、插件锁或空证据文件。
 - 创建、关闭或校验记录使用
   `.agents/skills/task-loop-run/scripts/workflow.py`，不要手工分配序号。
+
+## 代码仓与工作区
+
+- 被操作的目标代码仓放在 `.code/<repo>/`，每个都是独立 Git 仓库。本仓忽略 `.code/`，不把目标代码
+  仓的文件、产物或提交带进本仓历史。
+- 一个 Task 在目标代码仓上对应一个分支 `task/<task-id>`，代码改动在该分支上由代码仓自己提交。
+- 使用 `add-repo` 放入代码仓并准备分支，不要手工 clone 到别处或手工拼分支名：
+
+  ```bash
+  python .agents/skills/task-loop-run/scripts/workflow.py add-repo tasks/<task> \
+    --source <路径或 URL> [--name <目录名>] [--no-checkout]
+  ```
+
+- 只有一个 Task 在推进时，直接在主工作树的 `.code/<repo>` 上使用该 Task 分支。
+- 多个 Task 需要并行时用链接工作树隔离：本仓分支 `task/<task-id>` 检出到一个链接工作树，其中的
+  `.code/<repo>` 是目标代码仓的对应链接工作树。创建前先把 Task 记录提交到本仓，否则工作树看不到它：
+
+  ```bash
+  python .agents/skills/task-loop-run/scripts/workflow.py add-worktree tasks/<task> [--path <目录>]
+  python .agents/skills/task-loop-run/scripts/workflow.py remove-worktree tasks/<task> [--merge]
+  ```
+
+- Task 完成后，把本仓的 Task 分支合入主工作树的当前分支并回收链接工作树；目标代码仓的 Task 分支
+  是否合入、如何合入由用户决定，需要推送或提交 PR/MR 时按外部动作处理。
+- 同一分支不能同时检出到两个工作树。遇到分支占用先解除占用，不要改名绕开。
 
 ## Git 与外部动作
 

@@ -52,6 +52,10 @@ Model 与 Harness 可以来自同一个厂商，但不同 Agent Home 会使 Agen
 Project 是我们需要让 Agent 去操作的对象，例如一个代码库，一个PPT Word 目录等等。 Agent Home 是对 Agent 的
 管理和能力加持，这部分和操作对象分离。
 
+本仓把这条边界落在 `.code/`：目标代码仓放在 `.code/` 下并被 Git 忽略，自己提交自己的历史；Home 只登记
+它的目录、来源和 Task 分支。一个 Task 对应一个代码分支，多个 Task 并行时用 Git 工作树隔离，完成后合入
+主分支。细节见 [代码仓与并行工作区](code-workspace.md)。
+
 
 
 ## 方案

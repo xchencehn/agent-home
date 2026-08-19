@@ -41,6 +41,38 @@ description: 在仓库内用 Task、Loop 和 Run 记录管理持久工作。当�
 
 命令会输出新建路径。Run 开始后，把 `contract.json` 视为不可变合同。
 
+## 目标代码仓
+
+1. Task 需要改动目标代码时，把代码仓放进 `.code/`，并为它准备 Task 分支 `task/<task-id>`：
+
+   ```bash
+   python .agents/skills/task-loop-run/scripts/workflow.py add-repo tasks/<task> \
+     --source <路径或 URL> --name <目录名>
+   ```
+
+2. `.code/` 被本仓忽略。代码改动在 `task/<task-id>` 分支上由该代码仓自己提交，不进入本仓历史。
+3. 主工作树已经被另一个 Task 分支占用时，加 `--no-checkout` 只登记并创建分支，再用链接工作树取用。
+4. 登记结果写入 `task.json` 的 `repos`，记录目录、来源和分支，恢复时据此找回代码工作面。
+
+## 并行隔离
+
+1. 多个 Task 需要同时推进时，先把 Task 记录提交到本仓，再创建链接工作树：
+
+   ```bash
+   python .agents/skills/task-loop-run/scripts/workflow.py add-worktree tasks/<task>
+   ```
+
+   命令为本仓分支 `task/<task-id>` 创建工作树，并为 `repos` 中每个代码仓在工作树的 `.code/` 下
+   创建同名分支的工作树。
+2. 之后所有工作在该工作树内进行：Task 记录提交到本仓分支，代码提交到代码仓分支。
+3. Task 收尾时把 Task 分支合入主工作树的当前分支，并回收链接工作树：
+
+   ```bash
+   python .agents/skills/task-loop-run/scripts/workflow.py remove-worktree tasks/<task> --merge
+   ```
+
+   目标代码仓的 Task 分支保留在代码仓内；是否合入、是否推送由用户决定。
+
 ## 执行与关闭
 
 1. 只执行当前 Run 合同规定的内容。
@@ -70,7 +102,7 @@ description: 在仓库内用 Task、Loop 和 Run 记录管理持久工作。当�
 
 ## 记录契约
 
-- `tasks/<task>/task.json`：目标、生命周期、最终结果和 Task 导航。
+- `tasks/<task>/task.json`：目标、生命周期、最终结果、代码仓登记和 Task 导航。
 - `tasks/<task>/grill/`：设计简报、Task 术语、风险和决策。
 - `loops/<loop>/goal.md`、`hypotheses.md`、`state.json`：冻结的方向和 Loop 导航。
 - `runs/<run>/contract.json`：不可变的执行合同。

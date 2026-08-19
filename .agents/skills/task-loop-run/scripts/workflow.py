@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import re
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,6 +13,9 @@ from pathlib import Path
 SCHEMA_VERSION = 1
 SLUG_RE = re.compile(r"[^a-z0-9]+")
 ID_RE = re.compile(r"^(\d{3})_([a-z0-9][a-z0-9-]*)$")
+CODE_DIR = ".code"
+REPO_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+USERINFO_RE = re.compile(r"^([a-zA-Z][a-zA-Z0-9+.\-]*://)[^/@]*@")
 ACTION_KINDS = (
     "orient",
     "clarify",
@@ -147,6 +151,209 @@ def require_active(record, path):
         raise WorkflowError(f"记录不是活动状态：{path}")
 
 
+def task_branch(task_id):
+    return f"task/{task_id}"
+
+
+def git(cwd, *arguments, check=True):
+    result = subprocess.run(
+        ["git", "-C", str(cwd), *arguments],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if check and result.returncode != 0:
+        detail = (result.stderr or result.stdout).strip()
+        raise WorkflowError(f"git {' '.join(arguments)} 失败：{detail}")
+    return result
+
+
+def git_output(cwd, *arguments):
+    return git(cwd, *arguments).stdout.strip()
+
+
+def git_succeeds(cwd, *arguments):
+    return git(cwd, *arguments, check=False).returncode == 0
+
+
+def require_worktree(path, role):
+    if not path.is_dir() or not git_succeeds(path, "rev-parse", "--is-inside-work-tree"):
+        raise WorkflowError(f"{role}不是 Git 工作树：{path}")
+
+
+def require_commit(repo, role):
+    if not git_succeeds(repo, "rev-parse", "--verify", "--quiet", "HEAD"):
+        raise WorkflowError(f"{role}还没有任何提交，无法创建 Task 分支：{repo}")
+
+
+def branch_exists(repo, branch):
+    return git_succeeds(repo, "show-ref", "--verify", "--quiet", f"refs/heads/{branch}")
+
+
+def worktree_paths(repo):
+    """返回 {分支名: 检出目录}，覆盖主工作树和所有链接工作树。"""
+    mapping = {}
+    current = None
+    for line in git_output(repo, "worktree", "list", "--porcelain").splitlines():
+        if line.startswith("worktree "):
+            current = Path(line[len("worktree ") :])
+        elif line.startswith("branch refs/heads/") and current is not None:
+            mapping[line[len("branch refs/heads/") :]] = current
+    return mapping
+
+
+def require_free_branch(repo, branch, role):
+    holder = worktree_paths(repo).get(branch)
+    if holder is not None:
+        raise WorkflowError(
+            f"{role}：分支 {branch} 已经在 {holder} 检出。同一分支不能同时检出到两个工作树，"
+            f"先在该工作树切换到别的分支，或者用 add-repo --no-checkout 登记后再建链接工作树"
+        )
+
+
+def sanitize_source(url):
+    """去掉 URL 中的用户名与令牌，只保留可记录的来源。"""
+    if not url:
+        return None
+    return USERINFO_RE.sub(r"\1", url)
+
+
+def repo_name_from_source(source):
+    name = source.rstrip("/").rsplit("/", 1)[-1]
+    return name[:-4] if name.endswith(".git") else name
+
+
+def find_repo_entry(record, name):
+    for entry in record.get("repos", []):
+        if entry.get("name") == name:
+            return entry
+    return None
+
+
+def cmd_add_repo(args):
+    task = resolve_ref(args.root, args.task)
+    record = read_json(task / "task.json")
+    require_active(record, task)
+    name = args.name or repo_name_from_source(args.source or "")
+    if not REPO_NAME_RE.fullmatch(name):
+        raise WorkflowError(f"代码仓目录名无效：{name!r}")
+    code = args.root / CODE_DIR
+    code.mkdir(exist_ok=True)
+    repo = ensure_under(args.root, code / name)
+    if not repo.exists():
+        if not args.source:
+            raise WorkflowError(f"{repo} 不存在，需要用 --source 指定代码仓来源")
+        git(code, "clone", args.source, name)
+    require_worktree(repo, "代码仓")
+    require_commit(repo, "代码仓")
+    branch = task_branch(record["id"])
+    if not branch_exists(repo, branch):
+        git(repo, "branch", branch, args.base)
+    if args.checkout:
+        holder = worktree_paths(repo).get(branch)
+        if holder is not None and holder.resolve() != repo.resolve():
+            raise WorkflowError(
+                f"分支 {branch} 已经在 {holder} 检出；并行 Task 使用 add-worktree 隔离"
+            )
+        git(repo, "checkout", branch)
+    source = args.source
+    if not source and git_succeeds(repo, "remote", "get-url", "origin"):
+        source = git_output(repo, "remote", "get-url", "origin")
+    entry = {
+        "name": name,
+        "path": f"{CODE_DIR}/{name}",
+        "source": sanitize_source(source),
+        "branch": branch,
+        "registered_at": now(),
+    }
+    repos = [item for item in record.get("repos", []) if item.get("name") != name]
+    repos.append(entry)
+    record["repos"] = sorted(repos, key=lambda item: item["name"])
+    record["updated_at"] = now()
+    write_json(task / "task.json", record)
+    print(entry["path"])
+
+
+def cmd_add_worktree(args):
+    task = resolve_ref(args.root, args.task)
+    record = read_json(task / "task.json")
+    require_active(record, task)
+    require_worktree(args.root, "管理仓")
+    require_commit(args.root, "管理仓")
+    relative_task = task.relative_to(args.root).as_posix()
+    if not git_succeeds(args.root, "ls-files", "--error-unmatch", f"{relative_task}/task.json"):
+        raise WorkflowError(
+            f"Task 记录还没有提交到管理仓，链接工作树看不到它：先提交 {relative_task}/"
+        )
+    branch = task_branch(record["id"])
+    require_free_branch(args.root, branch, "管理仓")
+    path = (
+        Path(args.path).expanduser().resolve()
+        if args.path
+        else args.root.parent / f"{args.root.name}.worktrees" / record["id"]
+    )
+    if path.exists():
+        raise WorkflowError(f"工作树路径已存在：{path}")
+    for entry in record.get("repos", []):
+        repo = args.root / entry["path"]
+        if repo.is_dir():
+            require_free_branch(repo, entry["branch"], f"代码仓 {entry['name']}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if branch_exists(args.root, branch):
+        git(args.root, "worktree", "add", str(path), branch)
+    else:
+        git(args.root, "worktree", "add", "-b", branch, str(path), args.base)
+    for entry in record.get("repos", []):
+        repo = args.root / entry["path"]
+        if not repo.is_dir():
+            print(f"跳过尚未检出的代码仓：{entry['path']}", file=sys.stderr)
+            continue
+        target = path / entry["path"]
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if branch_exists(repo, entry["branch"]):
+            git(repo, "worktree", "add", str(target), entry["branch"])
+        else:
+            git(repo, "worktree", "add", "-b", entry["branch"], str(target), args.base)
+    print(path)
+
+
+def cmd_remove_worktree(args):
+    task = resolve_ref(args.root, args.task)
+    record = read_json(task / "task.json")
+    require_worktree(args.root, "管理仓")
+    branch = task_branch(record["id"])
+    holder = worktree_paths(args.root).get(branch)
+    if holder is None or holder.resolve() == args.root.resolve():
+        raise WorkflowError(f"没有找到检出 {branch} 的链接工作树")
+    if git_output(holder, "status", "--porcelain") and not args.force:
+        raise WorkflowError(f"链接工作树还有未提交改动：{holder}")
+    if args.merge:
+        if git_output(args.root, "status", "--porcelain"):
+            raise WorkflowError(f"合入前主工作树必须干净：{args.root}")
+        git(args.root, "merge", "--no-ff", branch, "-m", f"Merge branch '{branch}'")
+    for entry in record.get("repos", []):
+        repo = args.root / entry["path"]
+        target = holder / entry["path"]
+        if not repo.is_dir() or not target.is_dir():
+            continue
+        arguments = ["worktree", "remove", str(target)]
+        if args.force:
+            arguments.append("--force")
+        git(repo, *arguments)
+    leftover = holder / CODE_DIR
+    remaining = sorted(item.name for item in leftover.iterdir()) if leftover.is_dir() else []
+    if remaining and not args.force:
+        raise WorkflowError(f"{leftover} 仍有未登记的代码仓：{'、'.join(remaining)}")
+    arguments = ["worktree", "remove", str(holder)]
+    if args.force:
+        arguments.append("--force")
+    git(args.root, *arguments)
+    parent = holder.parent
+    if parent != args.root and parent.is_dir() and not any(parent.iterdir()):
+        parent.rmdir()
+    print(holder)
+
+
 def cmd_open_task(args):
     tasks = args.root / "tasks"
     tasks.mkdir(exist_ok=True)
@@ -165,6 +372,7 @@ def cmd_open_task(args):
         "updated_at": timestamp,
         "acceptance": args.acceptance,
         "non_goals": args.non_goal,
+        "repos": [],
         "active_loop_id": None,
         "outcome": None,
         "navigation": navigation(args.objective, "foggy", args.acceptance),
@@ -535,11 +743,34 @@ def check_loop(loop):
         raise WorkflowError(f"active_run_id 指向已经结束的 Run：{loop}")
 
 
+def check_repos(record, path):
+    repos = record.get("repos", [])
+    if not isinstance(repos, list):
+        raise WorkflowError(f"{path} 的 repos 必须是列表")
+    names = []
+    for entry in repos:
+        missing = [field for field in ("name", "path", "branch") if not entry.get(field)]
+        if missing:
+            raise WorkflowError(f"{path} 的代码仓登记缺少字段：{', '.join(missing)}")
+        if not REPO_NAME_RE.fullmatch(entry["name"]):
+            raise WorkflowError(f"{path} 的代码仓目录名无效：{entry['name']!r}")
+        if entry["path"] != f"{CODE_DIR}/{entry['name']}":
+            raise WorkflowError(f"{path} 的代码仓路径必须是 {CODE_DIR}/<name>：{entry['path']}")
+        if entry["branch"] != task_branch(record["id"]):
+            raise WorkflowError(
+                f"{path} 的代码仓分支必须是 {task_branch(record['id'])}：{entry['branch']}"
+            )
+        names.append(entry["name"])
+    if len(names) != len(set(names)):
+        raise WorkflowError(f"{path} 的代码仓登记重复")
+
+
 def check_task(task):
     record = read_json(task / "task.json")
     require_fields(record, ("schema_version", "kind", "id", "title", "objective", "status", "navigation"), task / "task.json")
     if record["id"] != task.name:
         raise WorkflowError(f"Task ID 与目录名不一致：{task}")
+    check_repos(record, task / "task.json")
     for name in ("design-brief.md", "glossary.md", "risks.md", "decisions.md"):
         if not (task / "grill" / name).is_file():
             raise WorkflowError(f"缺少设计梳理文件：{task / 'grill' / name}")
@@ -604,6 +835,31 @@ def build_parser():
     command.add_argument("--acceptance", action="append", required=True)
     command.add_argument("--allowed-change", action="append", default=[])
     command.set_defaults(func=cmd_open_run)
+
+    command = subparsers.add_parser("add-repo", help="把目标代码仓放入 .code/ 并准备 Task 分支")
+    command.add_argument("task")
+    command.add_argument("--source", help="代码仓来源，本地路径或远端 URL；.code/<name> 已存在时可省略")
+    command.add_argument("--name", help="`.code/` 下的目录名，默认取自来源")
+    command.add_argument("--base", default="HEAD", help="创建 Task 分支的基点")
+    command.add_argument(
+        "--no-checkout",
+        dest="checkout",
+        action="store_false",
+        help="只创建分支和登记，不切换当前检出（并行 Task 使用）",
+    )
+    command.set_defaults(func=cmd_add_repo, checkout=True)
+
+    command = subparsers.add_parser("add-worktree", help="为并行 Task 创建链接工作树")
+    command.add_argument("task")
+    command.add_argument("--path", help="工作树目录，默认 ../<仓库名>.worktrees/<task-id>")
+    command.add_argument("--base", default="HEAD", help="创建 Task 分支的基点")
+    command.set_defaults(func=cmd_add_worktree)
+
+    command = subparsers.add_parser("remove-worktree", help="移除链接工作树，可选先合入主工作树")
+    command.add_argument("task")
+    command.add_argument("--merge", action="store_true", help="先把 Task 分支合入管理仓当前分支")
+    command.add_argument("--force", action="store_true", help="忽略未提交改动和未登记代码仓")
+    command.set_defaults(func=cmd_remove_worktree)
 
     command = subparsers.add_parser("set-next-action", help="选择并保存一个下一步")
     command.add_argument("record")

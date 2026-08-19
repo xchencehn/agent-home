@@ -107,6 +107,35 @@ Run 打开后，`contract.json` 不再改写；事实追加到 `checkpoints.json
 
 完整设计思想见 [Agent Home：项目自有的持久工作环境](docs/home-engineering.md)。
 
+## 目标代码仓与并行 Task
+
+管理仓（本仓）只保存目标、规则、工作状态和结论；被操作的目标代码仓放在 `.code/` 下，由 Git 忽略，
+各自提交自己的历史：
+
+```text
+agent-home/            # 管理仓：AGENTS.md、PROJECT.md、tasks/、docs/
+└── .code/             # 被忽略：目标代码仓的工作面
+    └── sparseRT/      # 独立 Git 仓，Task 分支 task/001_xxx
+```
+
+一个 Task 对应目标代码仓上的一个分支：
+
+```bash
+python .agents/skills/task-loop-run/scripts/workflow.py add-repo tasks/001_xxx \
+  --source https://example.com/sparseRT.git
+```
+
+多个 Task 需要并行时，管理仓用 Git 工作树隔离，工作树内自带对应的代码仓工作树；Task 完成后合入
+管理仓主分支并回收工作树：
+
+```bash
+git add tasks/002_yyy && git commit -m "Open task 002"
+python .agents/skills/task-loop-run/scripts/workflow.py add-worktree tasks/002_yyy
+python .agents/skills/task-loop-run/scripts/workflow.py remove-worktree tasks/002_yyy --merge
+```
+
+完整流程与边界见 [代码仓与并行工作区](docs/code-workspace.md)。
+
 ## 仓库结构
 
 - `AGENTS.md`：Codex 与其他兼容 Agent 的根规则。
@@ -115,6 +144,7 @@ Run 打开后，`contract.json` 不再改写；事实追加到 `checkpoints.json
 - `.agents/skills/`：仓库级 Skill，也是工作流的唯一源码。
 - `.claude/skills/`：Claude Code 的薄发现包装层，不复制工作流。
 - `tasks/`：按需生成的跨会话工作记录。
+- `.code/`：被操作的目标代码仓，Git 忽略，由各代码仓自行提交。
 - `docs/`：面向使用者的设计和说明。
 - `reports/`：需要长期保留、且有证据支持的工程结论。
 - `tests/`：机器可复验的项目判据。

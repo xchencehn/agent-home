@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -18,15 +19,50 @@ SKILLS = (
 
 
 class TemplateContractTest(unittest.TestCase):
+    def environment(self):
+        """固定 Git 身份并隔离用户配置，使测试不依赖执行机器的 Git 设置。"""
+        values = dict(os.environ)
+        values.update(
+            {
+                "GIT_AUTHOR_NAME": "template test",
+                "GIT_AUTHOR_EMAIL": "template@example.com",
+                "GIT_COMMITTER_NAME": "template test",
+                "GIT_COMMITTER_EMAIL": "template@example.com",
+                "GIT_CONFIG_GLOBAL": os.devnull,
+                "GIT_CONFIG_SYSTEM": os.devnull,
+            }
+        )
+        return values
+
     def run_workflow(self, root, *arguments, expected=0):
         result = subprocess.run(
             [sys.executable, str(WORKFLOW), "--root", str(root), *arguments],
             text=True,
             capture_output=True,
             check=False,
+            env=self.environment(),
         )
         self.assertEqual(result.returncode, expected, result.stderr)
         return result.stdout.strip()
+
+    def git(self, cwd, *arguments, expected=0):
+        result = subprocess.run(
+            ["git", "-C", str(cwd), *arguments],
+            text=True,
+            capture_output=True,
+            check=False,
+            env=self.environment(),
+        )
+        self.assertEqual(result.returncode, expected, result.stderr)
+        return result.stdout.strip()
+
+    def init_repository(self, path, filename):
+        path.mkdir(parents=True, exist_ok=True)
+        self.git(path, "init", "-q", "-b", "main")
+        (path / filename).write_text("seed\n", encoding="utf-8")
+        self.git(path, "add", "-A")
+        self.git(path, "commit", "-qm", "init")
+        return path
 
     def test_required_entrypoints_exist(self):
         for path in (
@@ -37,6 +73,7 @@ class TemplateContractTest(unittest.TestCase):
             "LICENSE",
             "LICENSE.zh-CN",
             "docs/home-engineering.md",
+            "docs/code-workspace.md",
         ):
             self.assertTrue((ROOT / path).is_file(), path)
         for skill in SKILLS:
@@ -113,6 +150,97 @@ class TemplateContractTest(unittest.TestCase):
         ):
             self.assertIn(statement, document)
         self.assertLessEqual(len(document.splitlines()), 200)
+
+    def test_code_workspace_is_ignored_and_documented(self):
+        self.assertIn("/.code/", (ROOT / ".gitignore").read_text())
+        rules = (ROOT / "AGENTS.md").read_text()
+        for statement in ("`.code/<repo>/`", "task/<task-id>", "add-repo", "add-worktree", "remove-worktree"):
+            self.assertIn(statement, rules)
+        readme = (ROOT / "README.md").read_text()
+        self.assertIn("`.code/`", readme)
+        self.assertIn("docs/code-workspace.md", readme)
+        self.assertIn("code-workspace.md", (ROOT / "docs/README.md").read_text())
+        workflow_skill = (ROOT / ".agents/skills/task-loop-run/SKILL.md").read_text()
+        self.assertIn("add-repo", workflow_skill)
+        self.assertIn("add-worktree", workflow_skill)
+
+    def test_task_branch_and_parallel_worktree_isolation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            upstream = self.init_repository(base / "upstream", "main.c")
+            root = self.init_repository(base / "home", "PROJECT.md")
+            (root / ".gitignore").write_text("/.code/\n", encoding="utf-8")
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-qm", "ignore code workspace")
+
+            first = self.run_workflow(
+                root, "open-task", "alpha", "--title", "第一个", "--objective", "第一个目标"
+            )
+            second = self.run_workflow(
+                root, "open-task", "beta", "--title", "第二个", "--objective", "第二个目标"
+            )
+
+            registered = self.run_workflow(
+                root, "add-repo", first, "--source", str(upstream), "--name", "demo"
+            )
+            self.assertEqual(registered, ".code/demo")
+            code = root / ".code" / "demo"
+            self.assertEqual(self.git(code, "rev-parse", "--abbrev-ref", "HEAD"), "task/001_alpha")
+            self.assertEqual(self.git(root, "status", "--porcelain", "--", ".code"), "")
+
+            self.run_workflow(
+                root, "add-repo", second, "--source", str(upstream), "--name", "demo", "--no-checkout"
+            )
+            self.assertEqual(self.git(code, "rev-parse", "--abbrev-ref", "HEAD"), "task/001_alpha")
+            entry = json.loads((root / second / "task.json").read_text())["repos"][0]
+            self.assertEqual(entry["path"], ".code/demo")
+            self.assertEqual(entry["branch"], "task/002_beta")
+
+            self.run_workflow(root, "add-worktree", second, expected=2)
+            self.git(root, "add", "-A")
+            self.git(root, "commit", "-qm", "open tasks")
+
+            worktree = Path(self.run_workflow(root, "add-worktree", second))
+            self.assertTrue((worktree / second / "task.json").is_file())
+            self.assertEqual(
+                self.git(worktree / ".code" / "demo", "rev-parse", "--abbrev-ref", "HEAD"),
+                "task/002_beta",
+            )
+            self.assertEqual(self.git(code, "rev-parse", "--abbrev-ref", "HEAD"), "task/001_alpha")
+            self.run_workflow(
+                root, "add-repo", second, "--source", str(upstream), "--name", "demo", expected=2
+            )
+
+            (worktree / ".code" / "demo" / "main.c").write_text("changed\n", encoding="utf-8")
+            self.git(worktree / ".code" / "demo", "commit", "-qam", "beta code change")
+            (worktree / second / "note.md").write_text("beta\n", encoding="utf-8")
+            self.git(worktree, "add", "-A")
+            self.git(worktree, "commit", "-qm", "record beta")
+
+            self.run_workflow(root, "remove-worktree", second, "--merge")
+            self.assertFalse(worktree.exists())
+            self.assertTrue((root / second / "note.md").is_file())
+            self.assertIn("beta code change", self.git(code, "log", "--oneline", "task/002_beta"))
+            self.assertEqual(self.git(root, "status", "--porcelain"), "")
+            self.assertEqual(self.run_workflow(root, "check"), "通过")
+
+    def test_check_rejects_inconsistent_repo_registration(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            task = self.run_workflow(
+                root, "open-task", "alpha", "--title", "标题", "--objective", "目标"
+            )
+            record_path = root / task / "task.json"
+            record = json.loads(record_path.read_text())
+            self.assertEqual(record["repos"], [])
+            for broken in (
+                {"name": "demo", "path": ".code/demo", "branch": "task/999_other"},
+                {"name": "demo", "path": "code/demo", "branch": "task/001_alpha"},
+                {"name": "demo", "branch": "task/001_alpha"},
+            ):
+                record["repos"] = [broken]
+                record_path.write_text(json.dumps(record, ensure_ascii=False), encoding="utf-8")
+                self.run_workflow(root, "check", expected=2)
 
     def test_task_loop_run_round_trip_and_contract_immutability(self):
         with tempfile.TemporaryDirectory() as directory:
