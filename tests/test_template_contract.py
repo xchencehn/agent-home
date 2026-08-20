@@ -19,6 +19,27 @@ SKILLS = (
 )
 
 
+def plugin_surface_violations(root):
+    """列出插件化安装面。
+
+    `.agent-home/` 保存模板版本清单与模板仓缓存，是安装式项目的正常组成部分，只有它下面出现别的
+    安装产物时才算违规。
+    """
+    violations = [
+        name
+        for name in (".codex-plugin", "agent_home", "marketplace.json")
+        if (root / name).exists()
+    ]
+    state = root / ".agent-home"
+    if state.is_dir():
+        violations.extend(
+            f".agent-home/{item.name}"
+            for item in sorted(state.iterdir())
+            if item.name not in ("manifest.json", "upstream")
+        )
+    return violations
+
+
 class TemplateContractTest(unittest.TestCase):
     def environment(self):
         """固定 Git 身份并隔离用户配置，使测试不依赖执行机器的 Git 设置。"""
@@ -108,8 +129,22 @@ class TemplateContractTest(unittest.TestCase):
                 self.assertTrue(metadata.is_file(), metadata)
 
     def test_plugin_surfaces_are_absent(self):
-        for path in (".codex-plugin", ".agent-home", "agent_home"):
-            self.assertFalse((ROOT / path).exists(), path)
+        self.assertEqual(plugin_surface_violations(ROOT), [])
+
+    def test_template_manifest_is_not_a_plugin_surface(self):
+        """安装式项目的 .agent-home/ 必须能通过这条契约，否则迁移后的项目会误报。"""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / ".agent-home").mkdir()
+            (root / ".agent-home/manifest.json").write_text("{}", encoding="utf-8")
+            (root / ".agent-home/upstream").mkdir()
+            self.assertEqual(plugin_surface_violations(root), [])
+            (root / ".codex-plugin").mkdir()
+            (root / ".agent-home/marketplace.json").write_text("{}", encoding="utf-8")
+            self.assertEqual(
+                plugin_surface_violations(root),
+                [".codex-plugin", ".agent-home/marketplace.json"],
+            )
 
     def test_project_state_is_consistent(self):
         project = (ROOT / "PROJECT.md").read_text()
