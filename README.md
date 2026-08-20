@@ -1,19 +1,69 @@
 # Agent Home
 
-一个可以直接克隆使用的 Agent 项目模板。仓库本身就是 Agent Home：根规则、项目说明、Task/Loop/Run
-工作协议和可复用 Skill（技能）都随 Git 一起分发，不需要安装插件。
+一个可以直接用来管理项目的 Agent Home：根规则、项目说明、Task/Loop/Run 工作协议和可复用 Skill
+（技能）都随 Git 分发，不需要安装插件，并且可以在项目里一句话同步到模板的新版本。
+
+<!-- agent-install:start -->
+## 给 Agent 的安装指令
+
+被要求“使用本仓管理这个项目”时，在项目目录里执行：
+
+```bash
+git clone https://github.com/xchencehn/agent-home .agent-home/upstream
+python3 .agent-home/upstream/.agents/scripts/agent_home.py init
+```
+
+然后读取生成的 `AGENTS.md`，按其中的启动顺序用 `bootstrap-project` 完成 `PROJECT.md` 初始化。
+之后同步模板新版本用 `python3 .agents/scripts/agent_home.py upgrade`。
+<!-- agent-install:end -->
 
 ## 开始使用
 
-克隆时直接指定项目目录名：
+新建一个空目录，在里面启动 Codex 或 Claude Code：
 
 ```bash
-git clone https://github.com/xchencehn/agent-home.git sparseRT
-cd sparseRT
+mkdir sparseRT && cd sparseRT
 codex
 # 或
 claude
 ```
+
+直接说明要用本仓管理这个项目，并给出目标：
+
+```text
+使用 https://github.com/xchencehn/agent-home 管理这个项目，目标是模型图编译研发。
+```
+
+Agent 会执行上面的安装指令，把规则与技能装进当前目录，再初始化 `PROJECT.md`。项目仓库归项目自己
+所有：`origin` 不指向模板仓，历史里也没有模板提交。
+
+也可以继续把本仓直接克隆成项目骨架，但那样 `origin` 指向模板仓，后续升级只能手工合并：
+
+```bash
+git clone https://github.com/xchencehn/agent-home.git sparseRT
+```
+
+## 升级模板
+
+模板仓更新后，在项目里一句话同步：
+
+```text
+把 agent-home 模板同步到最新版本。
+```
+
+Agent 使用 `agent-home-sync`，实际执行：
+
+```bash
+python3 .agents/scripts/agent_home.py status --fetch
+python3 .agents/scripts/agent_home.py upgrade
+```
+
+受管理范围是 `AGENTS.md`、`CLAUDE.md`、`.agents/` 和 `.claude/skills/`，版本记录在
+`.agent-home/manifest.json`。`PROJECT.md`、`tasks/`、`docs/`、`reports/` 和 `.code/` 归项目所有，同步
+不会改动它们。本地改过的受管理文件按三方合并处理：能合并就合并，冲突时保留本地并写出 `.new` 文件
+供人工处理。完整说明见 [用 agent-home 管理项目](docs/agent-home-usage.md)。
+
+## 效果示例
 
 启动后直接描述目标，例如：
 
@@ -58,7 +108,8 @@ claude
 
 | Skill（技能） | 职责 |
 | --- | --- |
-| `bootstrap-project` | 把刚克隆或改名的模板初始化成具体项目 |
+| `agent-home-sync` | 安装模板，或把模板的新版本同步到当前项目 |
+| `bootstrap-project` | 把刚安装或刚克隆的模板初始化成具体项目 |
 | `task-loop-run` | Task 管目标，Loop 管可证伪方向，Run 管一次执行结果 |
 | `design-grill` | 在实施前澄清范围、术语、风险、验收、未知项和转向条件 |
 | `next-action` | 根据目标、行动前沿、阻塞和信息迷雾，每轮只选择一个下一步 |
@@ -142,6 +193,8 @@ python .agents/skills/task-loop-run/scripts/workflow.py remove-worktree tasks/00
 - `CLAUDE.md`：Claude Code 根入口，导入同一份 `AGENTS.md`。
 - `PROJECT.md`：项目身份、目标、范围与常用命令。
 - `.agents/skills/`：仓库级 Skill，也是工作流的唯一源码。
+- `.agents/scripts/agent_home.py`：模板安装与同步器。
+- `.agent-home/`：模板版本清单与模板仓本地缓存（缓存不提交）。
 - `.claude/skills/`：Claude Code 的薄发现包装层，不复制工作流。
 - `tasks/`：按需生成的跨会话工作记录。
 - `.code/`：被操作的目标代码仓，Git 忽略，由各代码仓自行提交。
@@ -155,8 +208,8 @@ python .agents/skills/task-loop-run/scripts/workflow.py remove-worktree tasks/00
 python -m unittest discover -s tests -v
 ```
 
-普通克隆会保留本模板为 `origin`。首次初始化不会删除或改写远端，也不会自动推送。准备发布到自己的
-仓库时，再明确要求 Agent 配置目标远端。
+通过安装指令得到的项目没有模板远端，`origin` 由项目自己决定；直接克隆本仓则会保留本模板为
+`origin`。两种方式下首次初始化都不会删除或改写远端，也不会自动推送。
 
 ## 许可证
 

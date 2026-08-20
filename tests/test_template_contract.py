@@ -10,6 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".agents/skills/task-loop-run/scripts/workflow.py"
 SKILLS = (
+    "agent-home-sync",
     "bootstrap-project",
     "task-loop-run",
     "design-grill",
@@ -74,6 +75,8 @@ class TemplateContractTest(unittest.TestCase):
             "LICENSE.zh-CN",
             "docs/home-engineering.md",
             "docs/code-workspace.md",
+            "docs/agent-home-usage.md",
+            ".agents/scripts/agent_home.py",
         ):
             self.assertTrue((ROOT / path).is_file(), path)
         for skill in SKILLS:
@@ -162,6 +165,21 @@ class TemplateContractTest(unittest.TestCase):
         ):
             self.assertIn(statement, rules)
         self.assertLess(rules.index("## 术语"), rules.index("## 启动顺序"))
+
+    def test_install_and_upgrade_entrypoints_are_documented(self):
+        readme = (ROOT / "README.md").read_text()
+        self.assertIn("agent-install:start", readme)
+        self.assertIn("agent-install:end", readme)
+        self.assertIn("git clone https://github.com/xchencehn/agent-home .agent-home/upstream", readme)
+        self.assertIn(".agent-home/upstream/.agents/scripts/agent_home.py init", readme)
+        self.assertIn(".agents/scripts/agent_home.py upgrade", readme)
+        self.assertIn("docs/agent-home-usage.md", readme)
+        rules = (ROOT / "AGENTS.md").read_text()
+        self.assertIn("## 模板同步", rules)
+        self.assertIn(".agent-home/manifest.json", rules)
+        self.assertIn("agent-home-sync", rules)
+        self.assertIn("/.agent-home/upstream/", (ROOT / ".gitignore").read_text())
+        self.assertIn("agent-home-usage.md", (ROOT / "docs/README.md").read_text())
 
     def test_code_workspace_is_ignored_and_documented(self):
         self.assertIn("/.code/", (ROOT / ".gitignore").read_text())

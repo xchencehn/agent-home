@@ -16,9 +16,11 @@ Task/Loop/Run 工作协议。
 ## 启动顺序
 
 1. 读取 `PROJECT.md`，再读取与请求直接相关的源码、测试、`docs/` 或 `reports/`。
-2. 若 `PROJECT.md` 含 `agent-home-template:uninitialized` 标记，使用 `bootstrap-project` Skill 完成首次初始化。
-3. 若用户请求已经给出项目目标，直接据此初始化；目标仍不明确时只问一个必要问题。
-4. 初始化后直接处理用户请求。一次性工作直接完成；长期、多阶段、需要跨会话恢复或验证假设的工作使用
+2. 若目录还没有 `AGENTS.md` 与 `.agent-home/manifest.json`，而用户要求用 agent-home 管理这个项目，
+   使用 `agent-home-sync` Skill 完成安装。
+3. 若 `PROJECT.md` 含 `agent-home-template:uninitialized` 标记，使用 `bootstrap-project` Skill 完成首次初始化。
+4. 若用户请求已经给出项目目标，直接据此初始化；目标仍不明确时只问一个必要问题。
+5. 初始化后直接处理用户请求。一次性工作直接完成；长期、多阶段、需要跨会话恢复或验证假设的工作使用
    `task-loop-run` Skill（技能）。
 
 ## 信息与所有权
@@ -32,6 +34,8 @@ Task/Loop/Run 工作协议。
 - `reports/` 只保存跨会话仍有价值、且有源码、测试或原始产物支撑的结论。
 - `tests/` 保存机器可复验的项目判据。
 - `.claude/skills/` 只保存转读 `.agents/skills/` 的 Claude Code 发现包装层，不维护第二份工作流。
+- `.agent-home/manifest.json` 保存模板来源、版本和受管理文件清单；`.agent-home/upstream/` 是模板仓
+  本地缓存，不提交。
 
 ## 工作方式
 
@@ -77,6 +81,21 @@ Task/Loop/Run 工作协议。
 - Task 完成后，把本仓的 Task 分支合入主工作树的当前分支并回收链接工作树；目标代码仓的 Task 分支
   是否合入、如何合入由用户决定，需要推送或提交 PR/MR 时按外部动作处理。
 - 同一分支不能同时检出到两个工作树。遇到分支占用先解除占用，不要改名绕开。
+
+## 模板同步
+
+- `AGENTS.md`、`CLAUDE.md`、`.agents/` 和 `.claude/skills/` 由 agent-home 模板管理，版本记录在
+  `.agent-home/manifest.json`；`PROJECT.md`、`tasks/`、`docs/`、`reports/` 和 `.code/` 归项目所有。
+- 用户要求升级、同步模板或拉取最新规则时使用 `agent-home-sync` Skill：
+
+  ```bash
+  python3 .agents/scripts/agent_home.py status --fetch
+  python3 .agents/scripts/agent_home.py upgrade
+  ```
+
+- 同步保留本地对受管理文件的改动：能三方合并的直接合并，冲突时保留本地并写出 `.new` 文件，需要人工
+  合并，不要用 `.new` 直接覆盖。
+- 不手工复制模板文件绕过同步器，那会让清单与实际内容脱节。
 
 ## Git 与外部动作
 

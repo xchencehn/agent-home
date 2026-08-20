@@ -9,14 +9,16 @@ description: 把刚克隆或改名的 Agent Home 仓库模板初始化成具体�
 
 ## 工作流程
 
-1. 确定 Git 根目录，读取 `AGENTS.md`、`PROJECT.md`、`README.md`，并检查
-   `git status --short --branch` 与 `git remote -v`。
+1. 确定 Git 根目录，读取 `AGENTS.md`、`PROJECT.md`、`README.md`（若有），并检查
+   `git status --short --branch` 与 `git remote -v`。存在 `.agent-home/manifest.json` 时是安装式项目：
+   `origin` 属于项目自己，模板版本由清单追踪，不要把 `origin` 当成模板仓。
 2. 使用根目录名称作为项目名称候选，不要自行修改目录名。
 3. 从用户请求中提取目标和初始范围。若请求没有提供目标，只问一个必要问题；得到回答前暂停初始化。
 4. 在 `PROJECT.md` 中写入项目名称、目标、当前范围、非目标、已发现的验证命令和稳定约束，并删除
    `agent-home-template:uninitialized` 标记。
-5. 只替换 `README.md` 中 `project-summary:start` 与 `project-summary:end` 之间的内容，写入项目名称、
-   用途和最短启动命令。除非用户要求删除，否则保留可复用的 Agent 工作空间说明。
+5. 已有 `README.md` 且含 `project-summary:start` 与 `project-summary:end` 标记时，只替换这两个标记
+   之间的内容，写入项目名称、用途和最短启动命令，并保留可复用的 Agent 工作空间说明；安装式项目还
+   没有 `README.md` 时，只在用户需要时新建一份简短的项目 README。
 6. 只有已经明确且始终适用的项目规则才写入 `AGENTS.md`。条件性工作流应写成新的仓库级 Skill，不要
    持续扩大根规则。
 7. 以 `.agents/skills/` 作为工作流唯一真值。`.claude/skills/bootstrap-project/SKILL.md` 只作为
