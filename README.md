@@ -112,7 +112,7 @@ python3 .agents/scripts/agent_home.py upgrade
 | `bootstrap-project` | 把刚安装或刚克隆的模板初始化成具体项目 |
 | `task-loop-run` | Task 管目标，Loop 管可证伪方向，Run 管一次执行结果 |
 | `design-grill` | 在实施前澄清范围、术语、风险、验收、未知项和转向条件 |
-| `next-action` | 根据目标、行动前沿、阻塞和信息迷雾，每轮只选择一个下一步 |
+| `next-action` | 在方向图上重算就绪集合，每轮只选择一个下一步 |
 | `evidence-checkpoint` | 只记录会改变路线、支撑结论或用于恢复交接的关键证据 |
 
 也可以在提示词中显式调用，例如：
@@ -130,6 +130,8 @@ Task 使用 `NNN_slug` 自动编号。一个典型记录如下：
 ```text
 tasks/001_example/
 ├── task.json
+├── graph.json
+├── graph-events.jsonl
 ├── grill/
 │   ├── design-brief.md
 │   ├── glossary.md
@@ -155,6 +157,15 @@ python .agents/skills/task-loop-run/scripts/workflow.py check
 
 Run 打开后，`contract.json` 不再改写；事实追加到 `checkpoints.jsonl`，当前恢复位置在 `state.json`，
 最终结果进入 `result.json`。没有生成状态页、插件锁、插件市场、安装缓存或强制验收状态机。
+
+Task 的候选方向保存在 `graph.json`：节点是方向、功能构成或未知问题，`requires` 边给出前置依赖。每次
+决策先重算就绪集合，只在就绪节点里选一个；被放弃的方向留在图上并携带复活条件，每次都会被重新列出
+复核。完整模型见 [方向图：在依赖图上选择下一步](docs/direction-graph.md)。
+
+```bash
+python .agents/skills/task-loop-run/scripts/workflow.py frontier tasks/001_example
+python .agents/skills/task-loop-run/scripts/workflow.py frontier tasks/001_example --format mermaid
+```
 
 完整设计思想见 [Agent Home：项目自有的持久工作环境](docs/home-engineering.md)。
 

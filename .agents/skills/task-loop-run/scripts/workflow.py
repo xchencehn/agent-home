@@ -28,6 +28,24 @@ ACTION_KINDS = (
     "closeout",
 )
 CHECKPOINT_KINDS = ("observation", "decision", "validation", "blocker", "handoff")
+GRAPH_NAME = "graph.json"
+GRAPH_EVENTS_NAME = "graph-events.jsonl"
+NODE_KINDS = ("direction", "component", "question")
+NODE_STATUSES = (
+    "open",
+    "active",
+    "confirmed",
+    "falsified",
+    "blocked",
+    "deferred",
+    "abandoned",
+    "superseded",
+)
+# 已经有结论的状态：不再进入前沿，但仍然是前置判定的依据。
+SETTLED_STATUSES = ("confirmed", "falsified", "superseded")
+# 暂缓与放弃的状态：每次计算前沿都要重新复核，避免机会被永久埋没。
+REVIEW_STATUSES = ("deferred", "abandoned")
+EDGE_KINDS = ("requires", "part-of", "informs", "conflicts", "supersedes")
 
 
 class WorkflowError(Exception):
@@ -149,6 +167,233 @@ def copy_grill_templates(task_path, objective):
 def require_active(record, path):
     if record.get("status") != "active":
         raise WorkflowError(f"记录不是活动状态：{path}")
+
+
+def empty_graph(task_id):
+    timestamp = now()
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "kind": "direction_graph",
+        "task_id": task_id,
+        "created_at": timestamp,
+        "updated_at": timestamp,
+        "nodes": [],
+        "edges": [],
+    }
+
+
+def load_graph(task):
+    path = task / GRAPH_NAME
+    if not path.is_file():
+        record = read_json(task / "task.json")
+        return empty_graph(record["id"])
+    return read_json(path)
+
+
+def save_graph(task, graph):
+    graph["updated_at"] = now()
+    write_json(task / GRAPH_NAME, graph)
+
+
+def append_graph_event(task, event, detail, why):
+    record = {
+        "schema_version": SCHEMA_VERSION,
+        "timestamp": now(),
+        "event": event,
+        "detail": detail,
+        "why": why,
+    }
+    with (task / GRAPH_EVENTS_NAME).open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+def node_index(graph):
+    return {node["id"]: node for node in graph["nodes"]}
+
+
+def require_node(graph, node_id):
+    node = node_index(graph).get(node_id)
+    if node is None:
+        raise WorkflowError(f"节点不存在：{node_id}")
+    return node
+
+
+def next_node_id(graph):
+    used = [
+        int(node["id"][1:])
+        for node in graph["nodes"]
+        if re.fullmatch(r"N\d+", node.get("id", ""))
+    ]
+    return f"N{max(used, default=0) + 1:03d}"
+
+
+def prerequisites(graph):
+    """返回 {节点: [它依赖的前置节点]}，只看 requires 边。"""
+    mapping = {node["id"]: [] for node in graph["nodes"]}
+    for edge in graph["edges"]:
+        if edge["kind"] == "requires":
+            mapping.setdefault(edge["from"], []).append(edge["to"])
+    return mapping
+
+
+def detect_cycle(graph):
+    """在 requires 边上做深度优先搜索，返回第一个发现的环。"""
+    dependencies = prerequisites(graph)
+    color = {}
+    stack = []
+
+    def visit(node_id):
+        color[node_id] = "gray"
+        stack.append(node_id)
+        for target in dependencies.get(node_id, []):
+            if color.get(target) == "gray":
+                return stack[stack.index(target) :] + [target]
+            if color.get(target) is None:
+                found = visit(target)
+                if found:
+                    return found
+        color[node_id] = "black"
+        stack.pop()
+        return None
+
+    for node in graph["nodes"]:
+        if color.get(node["id"]) is None:
+            found = visit(node["id"])
+            if found:
+                return found
+    return None
+
+
+def unlock_counts(graph):
+    """统计每个节点被多少个尚未定论的节点依赖。"""
+    nodes = node_index(graph)
+    counts = {node["id"]: 0 for node in graph["nodes"]}
+    for edge in graph["edges"]:
+        if edge["kind"] != "requires":
+            continue
+        dependent = nodes.get(edge["from"])
+        if dependent and dependent["status"] not in SETTLED_STATUSES:
+            counts[edge["to"]] = counts.get(edge["to"], 0) + 1
+    return counts
+
+
+def compute_frontier(graph):
+    """把图分成推进中、就绪、等待前置、外部阻塞、待复核和已定论六组。"""
+    nodes = node_index(graph)
+    dependencies = prerequisites(graph)
+    unlocks = unlock_counts(graph)
+    frontier = {"active": [], "ready": [], "waiting": [], "blocked": [], "review": [], "settled": []}
+    for node in graph["nodes"]:
+        entry = {"node": node, "unlocks": unlocks.get(node["id"], 0)}
+        status = node["status"]
+        if status in SETTLED_STATUSES:
+            frontier["settled"].append(entry)
+        elif status in REVIEW_STATUSES:
+            frontier["review"].append(entry)
+        elif status == "blocked":
+            frontier["blocked"].append(entry)
+        elif status == "active":
+            frontier["active"].append(entry)
+        else:
+            missing = [
+                target
+                for target in dependencies.get(node["id"], [])
+                if nodes.get(target, {}).get("status") != "confirmed"
+            ]
+            if missing:
+                entry["missing"] = missing
+                frontier["waiting"].append(entry)
+            else:
+                frontier["ready"].append(entry)
+    frontier["ready"].sort(key=lambda item: (-item["unlocks"], item["node"]["id"]))
+    frontier["waiting"].sort(key=lambda item: item["node"]["id"])
+    return frontier
+
+
+def node_label(node):
+    return f"{node['id']} [{node['kind']}] {node['title']}"
+
+
+def format_frontier(task_record, graph, frontier):
+    nodes = node_index(graph)
+    lines = [
+        f"Task {task_record['id']}：{task_record['objective']}",
+        f"图：节点 {len(graph['nodes'])} 个，边 {len(graph['edges'])} 条，更新于 {graph['updated_at']}",
+    ]
+    for key, title in (
+        ("active", "推进中"),
+        ("ready", "就绪"),
+        ("waiting", "等待前置"),
+        ("blocked", "外部阻塞"),
+    ):
+        items = frontier[key]
+        if not items:
+            continue
+        lines.append("")
+        lines.append(f"{title}（{len(items)}）")
+        for item in items:
+            node = item["node"]
+            detail = [f"解锁 {item['unlocks']}"] if item["unlocks"] else []
+            if node.get("cost"):
+                detail.append(f"代价：{node['cost']}")
+            if node.get("realized_as"):
+                detail.append(f"承载：{node['realized_as']}")
+            if item.get("missing"):
+                missing = "、".join(
+                    f"{target}({nodes.get(target, {}).get('status', '缺失')})" for target in item["missing"]
+                )
+                detail.append(f"缺前置：{missing}")
+            suffix = " | " + " | ".join(detail) if detail else ""
+            lines.append(f"  {node_label(node)}{suffix}")
+            if node.get("hypothesis"):
+                lines.append(f"      假设：{node['hypothesis']}")
+            if node.get("value"):
+                lines.append(f"      价值：{node['value']}")
+    lines.append("")
+    lines.append(f"需要重新评估（{len(frontier['review'])}）：暂缓与放弃的方向，每次决策都要复核")
+    for item in frontier["review"]:
+        node = item["node"]
+        lines.append(f"  {node_label(node)}（{node['status']}）")
+        if node.get("reason"):
+            lines.append(f"      当时理由：{node['reason']}")
+        lines.append(f"      复活条件：{node.get('revisit_when') or '未记录'}")
+    if frontier["settled"]:
+        lines.append("")
+        summary = "、".join(
+            f"{item['node']['id']}({item['node']['status']})" for item in frontier["settled"]
+        )
+        lines.append(f"已定论（{len(frontier['settled'])}）：{summary}")
+    return "\n".join(lines)
+
+
+def format_mermaid(graph, frontier):
+    """输出 mermaid 有向图；requires 边按“先做前置”的方向绘制。"""
+    group = {}
+    for key, items in frontier.items():
+        for item in items:
+            group[item["node"]["id"]] = key
+    lines = ["graph TD"]
+    for node in graph["nodes"]:
+        title = node["title"].replace('"', "'")
+        lines.append(f'  {node["id"]}["{node["id"]} {title}<br/>{node["status"]}"]:::{group.get(node["id"], "open")}')
+    for edge in graph["edges"]:
+        if edge["kind"] == "requires":
+            lines.append(f"  {edge['to']} --> {edge['from']}")
+        elif edge["kind"] == "part-of":
+            lines.append(f"  {edge['from']} -.-> {edge['to']}")
+        else:
+            lines.append(f"  {edge['from']} -. {edge['kind']} .-> {edge['to']}")
+    lines.extend(
+        [
+            "  classDef ready fill:#d5f5d5,stroke:#2f7a2f;",
+            "  classDef active fill:#d5e5ff,stroke:#2f5fa8;",
+            "  classDef waiting fill:#f5f5d5,stroke:#8a8a2f;",
+            "  classDef blocked fill:#f5d5d5,stroke:#a83f3f;",
+            "  classDef review fill:#eee,stroke:#888,stroke-dasharray: 4 3;",
+            "  classDef settled fill:#fff,stroke:#bbb;",
+        ]
+    )
+    return "\n".join(lines)
 
 
 def task_branch(task_id):
@@ -378,6 +623,8 @@ def cmd_open_task(args):
         "navigation": navigation(args.objective, "foggy", args.acceptance),
     }
     write_json(path / "task.json", record)
+    write_json(path / GRAPH_NAME, empty_graph(task_id))
+    (path / GRAPH_EVENTS_NAME).write_text("", encoding="utf-8")
     copy_grill_templates(path, args.objective)
     print(path.relative_to(args.root))
 
@@ -418,8 +665,29 @@ def cmd_open_loop(args):
         "updated_at": timestamp,
         "active_run_id": None,
         "outcome": None,
+        "node_id": args.node,
         "navigation": navigation(args.goal, "clear", args.acceptance),
     }
+    if args.node:
+        graph = load_graph(task)
+        node = require_node(graph, args.node)
+        nodes = node_index(graph)
+        missing = [
+            target
+            for target in prerequisites(graph).get(node["id"], [])
+            if nodes.get(target, {}).get("status") != "confirmed"
+        ]
+        if missing:
+            raise WorkflowError(
+                f"节点 {node['id']} 还有未满足的前置：{'、'.join(missing)}；先推进前置或改图"
+            )
+        if node["status"] in SETTLED_STATUSES:
+            raise WorkflowError(f"节点 {node['id']} 已经定论（{node['status']}），先复核它的状态")
+        node["status"] = "active"
+        node["realized_as"] = f"loops/{loop_id}"
+        node["updated_at"] = timestamp
+        save_graph(task, graph)
+        append_graph_event(task, "open_loop", {"node": node["id"], "loop": loop_id}, args.goal)
     write_json(path / "state.json", state)
     task_record["active_loop_id"] = loop_id
     task_record["updated_at"] = timestamp
@@ -491,6 +759,180 @@ def load_navigation_record(root, reference):
     return path, record
 
 
+def add_edge(graph, source, target, kind, note=None):
+    if source == target:
+        raise WorkflowError(f"边的两端不能是同一个节点：{source}")
+    require_node(graph, source)
+    require_node(graph, target)
+    for edge in graph["edges"]:
+        if edge["from"] == source and edge["to"] == target and edge["kind"] == kind:
+            return False
+    graph["edges"].append({"from": source, "to": target, "kind": kind, "note": note})
+    return True
+
+
+def require_acyclic(graph):
+    cycle = detect_cycle(graph)
+    if cycle:
+        raise WorkflowError(f"requires 边形成环：{' -> '.join(cycle)}")
+
+
+def owning_task(path):
+    """从任意记录路径向上找到所属 Task 目录。"""
+    start = path if path.is_dir() else path.parent
+    for candidate in (start, *start.parents):
+        if (candidate / "task.json").is_file():
+            return candidate
+    return None
+
+
+def cmd_add_node(args):
+    task = resolve_ref(args.root, args.task)
+    record = read_json(task / "task.json")
+    require_active(record, task)
+    graph = load_graph(task)
+    node_id = next_node_id(graph)
+    timestamp = now()
+    graph["nodes"].append(
+        {
+            "id": node_id,
+            "kind": args.kind,
+            "title": args.title,
+            "status": "open",
+            "hypothesis": args.hypothesis,
+            "value": args.value,
+            "cost": args.cost,
+            "evidence_refs": [],
+            "reason": None,
+            "revisit_when": None,
+            "realized_as": None,
+            "created_at": timestamp,
+            "updated_at": timestamp,
+        }
+    )
+    for target in args.requires:
+        add_edge(graph, node_id, target, "requires")
+    for target in args.part_of:
+        add_edge(graph, node_id, target, "part-of")
+    require_acyclic(graph)
+    save_graph(task, graph)
+    append_graph_event(
+        task,
+        "add_node",
+        {"node": node_id, "kind": args.kind, "title": args.title, "requires": args.requires},
+        args.why,
+    )
+    print(node_id)
+
+
+def cmd_link(args):
+    task = resolve_ref(args.root, args.task)
+    require_active(read_json(task / "task.json"), task)
+    graph = load_graph(task)
+    created = add_edge(graph, args.source, args.target, args.kind, args.note)
+    require_acyclic(graph)
+    save_graph(task, graph)
+    append_graph_event(
+        task,
+        "link",
+        {"from": args.source, "to": args.target, "kind": args.kind, "created": created},
+        args.why,
+    )
+    print(f"{args.source} -{args.kind}-> {args.target}")
+
+
+def cmd_unlink(args):
+    task = resolve_ref(args.root, args.task)
+    require_active(read_json(task / "task.json"), task)
+    graph = load_graph(task)
+    remaining = [
+        edge
+        for edge in graph["edges"]
+        if not (
+            edge["from"] == args.source
+            and edge["to"] == args.target
+            and (args.kind is None or edge["kind"] == args.kind)
+        )
+    ]
+    if len(remaining) == len(graph["edges"]):
+        raise WorkflowError(f"没有找到边：{args.source} -> {args.target}")
+    graph["edges"] = remaining
+    save_graph(task, graph)
+    append_graph_event(
+        task, "unlink", {"from": args.source, "to": args.target, "kind": args.kind}, args.why
+    )
+    print(f"已删除 {args.source} -> {args.target}")
+
+
+def cmd_set_node(args):
+    task = resolve_ref(args.root, args.task)
+    require_active(read_json(task / "task.json"), task)
+    graph = load_graph(task)
+    node = require_node(graph, args.node)
+    changes = {}
+    if args.revisit_when is not None:
+        node["revisit_when"] = args.revisit_when
+        changes["revisit_when"] = args.revisit_when
+    if args.status and args.status != node["status"]:
+        if args.status in REVIEW_STATUSES and not node.get("revisit_when"):
+            raise WorkflowError(
+                f"转为 {args.status} 前必须用 --revisit-when 记录什么新事实会让它重新值得考虑"
+            )
+        changes["status"] = [node["status"], args.status]
+        node["status"] = args.status
+    for field, value in (
+        ("title", args.title),
+        ("hypothesis", args.hypothesis),
+        ("value", args.value),
+        ("cost", args.cost),
+        ("reason", args.reason),
+    ):
+        if value is not None:
+            node[field] = value
+            changes[field] = value
+    if args.evidence_ref:
+        node["evidence_refs"] = sorted(set(node.get("evidence_refs", []) + args.evidence_ref))
+        changes["evidence_refs"] = args.evidence_ref
+    if not changes:
+        raise WorkflowError("没有需要修改的内容")
+    node["updated_at"] = now()
+    save_graph(task, graph)
+    append_graph_event(task, "set_node", {"node": node["id"], "changes": changes}, args.why)
+    print(node["id"])
+
+
+def cmd_frontier(args):
+    task = resolve_ref(args.root, args.task)
+    record = read_json(task / "task.json")
+    graph = load_graph(task)
+    frontier = compute_frontier(graph)
+    if args.format == "json":
+        payload = {
+            "task_id": record["id"],
+            "updated_at": graph["updated_at"],
+            "groups": {
+                key: [
+                    {
+                        "id": item["node"]["id"],
+                        "kind": item["node"]["kind"],
+                        "title": item["node"]["title"],
+                        "status": item["node"]["status"],
+                        "unlocks": item["unlocks"],
+                        "missing": item.get("missing", []),
+                        "revisit_when": item["node"].get("revisit_when"),
+                    }
+                    for item in items
+                ]
+                for key, items in frontier.items()
+            },
+        }
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    elif args.format == "mermaid":
+        print(format_mermaid(graph, frontier))
+    else:
+        print(format_frontier(record, graph, frontier))
+
+
 def cmd_set_next_action(args):
     path, record = load_navigation_record(args.root, args.record)
     nav = record["navigation"]
@@ -502,6 +944,24 @@ def cmd_set_next_action(args):
     }
     if clarity not in allowed or args.kind not in allowed[clarity]:
         raise WorkflowError(f"动作类型 {args.kind!r} 不适用于清晰度 {clarity!r}")
+    task = owning_task(path)
+    graph = load_graph(task) if task else None
+    if graph and graph["nodes"]:
+        frontier = compute_frontier(graph)
+        selectable = {
+            item["node"]["id"] for item in frontier["ready"] + frontier["active"]
+        }
+        if args.node:
+            node = require_node(graph, args.node)
+            if node["id"] not in selectable:
+                raise WorkflowError(
+                    f"节点 {node['id']} 不在就绪集合里（状态 {node['status']}）："
+                    "先满足它的前置，或先复核它的状态"
+                )
+        elif args.kind in ("probe", "execute", "decide", "verify") and not args.off_graph:
+            raise WorkflowError(
+                "方向图非空：用 --node 绑定这个动作对应的节点，或用 --off-graph 说明它为什么在图外"
+            )
     used = [int(item["id"][1:]) for item in nav["candidates"] if re.fullmatch(r"A\d+", item.get("id", ""))]
     candidate_id = f"A{max(used, default=0) + 1:03d}"
     candidate = {
@@ -512,6 +972,8 @@ def cmd_set_next_action(args):
         "done_when": args.done_when,
         "source_refs": args.source_ref,
         "strategy_basis": args.why_now,
+        "node_id": args.node,
+        "off_graph": args.off_graph,
         "created_at": now(),
     }
     nav["candidates"].append(candidate)
@@ -637,8 +1099,34 @@ def cmd_close_loop(args):
     state["updated_at"] = timestamp
     state["outcome"] = {"verdict": args.verdict, "summary": args.summary}
     terminal_navigation(state)
-    write_json(loop / "state.json", state)
     task = loop.parents[1]
+    node_id = state.get("node_id")
+    if node_id:
+        graph = load_graph(task)
+        node = require_node(graph, node_id)
+        target_status = {
+            "confirmed": "confirmed",
+            "falsified": "falsified",
+            "blocked": "blocked",
+            "abandoned": "abandoned",
+        }[args.verdict]
+        if args.revisit_when:
+            node["revisit_when"] = args.revisit_when
+        if target_status in REVIEW_STATUSES and not node.get("revisit_when"):
+            raise WorkflowError(
+                f"节点 {node_id} 转为 {target_status} 前必须用 --revisit-when 记录复活条件"
+            )
+        node["status"] = target_status
+        node["reason"] = args.summary
+        node["updated_at"] = timestamp
+        save_graph(task, graph)
+        append_graph_event(
+            task,
+            "close_loop",
+            {"node": node_id, "loop": state["id"], "status": target_status},
+            args.summary,
+        )
+    write_json(loop / "state.json", state)
     task_record = read_json(task / "task.json")
     if task_record.get("active_loop_id") == state["id"]:
         task_record["active_loop_id"] = None
@@ -765,12 +1253,53 @@ def check_repos(record, path):
         raise WorkflowError(f"{path} 的代码仓登记重复")
 
 
+def check_graph(task, record):
+    path = task / GRAPH_NAME
+    if not path.is_file():
+        return
+    graph = read_json(path)
+    require_fields(graph, ("schema_version", "kind", "task_id", "nodes", "edges"), path)
+    if graph["task_id"] != record["id"]:
+        raise WorkflowError(f"{path} 的 task_id 与 Task 不一致")
+    identifiers = []
+    for node in graph["nodes"]:
+        missing = [field for field in ("id", "kind", "title", "status") if not node.get(field)]
+        if missing:
+            raise WorkflowError(f"{path} 的节点缺少字段：{', '.join(missing)}")
+        if node["kind"] not in NODE_KINDS:
+            raise WorkflowError(f"{path} 的节点类型无效：{node['kind']}")
+        if node["status"] not in NODE_STATUSES:
+            raise WorkflowError(f"{path} 的节点状态无效：{node['status']}")
+        if node["status"] in REVIEW_STATUSES and not node.get("revisit_when"):
+            raise WorkflowError(f"{path} 的 {node['id']} 是 {node['status']} 但没有记录复活条件")
+        if node["status"] == "active" and not node.get("realized_as"):
+            raise WorkflowError(f"{path} 的 {node['id']} 是 active 但没有承载它的 Loop 或 Run")
+        identifiers.append(node["id"])
+    if len(identifiers) != len(set(identifiers)):
+        raise WorkflowError(f"{path} 的节点 ID 重复")
+    known = set(identifiers)
+    for edge in graph["edges"]:
+        missing = [field for field in ("from", "to", "kind") if not edge.get(field)]
+        if missing:
+            raise WorkflowError(f"{path} 的边缺少字段：{', '.join(missing)}")
+        if edge["kind"] not in EDGE_KINDS:
+            raise WorkflowError(f"{path} 的边类型无效：{edge['kind']}")
+        if edge["from"] not in known or edge["to"] not in known:
+            raise WorkflowError(f"{path} 的边引用了不存在的节点：{edge['from']} -> {edge['to']}")
+        if edge["from"] == edge["to"]:
+            raise WorkflowError(f"{path} 的边两端相同：{edge['from']}")
+    cycle = detect_cycle(graph)
+    if cycle:
+        raise WorkflowError(f"{path} 的 requires 边形成环：{' -> '.join(cycle)}")
+
+
 def check_task(task):
     record = read_json(task / "task.json")
     require_fields(record, ("schema_version", "kind", "id", "title", "objective", "status", "navigation"), task / "task.json")
     if record["id"] != task.name:
         raise WorkflowError(f"Task ID 与目录名不一致：{task}")
     check_repos(record, task / "task.json")
+    check_graph(task, record)
     for name in ("design-brief.md", "glossary.md", "risks.md", "decisions.md"):
         if not (task / "grill" / name).is_file():
             raise WorkflowError(f"缺少设计梳理文件：{task / 'grill' / name}")
@@ -826,6 +1355,7 @@ def build_parser():
     command.add_argument("--hypothesis", required=True)
     command.add_argument("--acceptance", action="append", required=True)
     command.add_argument("--falsification", action="append", required=True)
+    command.add_argument("--node", help="这个 Loop 推进的方向图节点")
     command.set_defaults(func=cmd_open_loop)
 
     command = subparsers.add_parser("open-run", help="打开一次有边界的 Run")
@@ -863,6 +1393,8 @@ def build_parser():
 
     command = subparsers.add_parser("set-next-action", help="选择并保存一个下一步")
     command.add_argument("record")
+    command.add_argument("--node", help="这个动作推进的方向图节点")
+    command.add_argument("--off-graph", help="动作不在方向图上的理由")
     command.add_argument("--kind", choices=ACTION_KINDS, required=True)
     command.add_argument("--action", required=True)
     command.add_argument("--target", required=True)
@@ -897,6 +1429,7 @@ def build_parser():
     command.add_argument("loop")
     command.add_argument("--verdict", choices=("confirmed", "falsified", "blocked", "abandoned"), required=True)
     command.add_argument("--summary", required=True)
+    command.add_argument("--revisit-when", help="放弃或暂缓时，什么新事实会让这个方向重新值得考虑")
     command.set_defaults(func=cmd_close_loop)
 
     command = subparsers.add_parser("close-task", help="关闭当前 Task")
@@ -904,6 +1437,54 @@ def build_parser():
     command.add_argument("--verdict", choices=("completed", "blocked", "abandoned"), required=True)
     command.add_argument("--summary", required=True)
     command.set_defaults(func=cmd_close_task)
+
+    command = subparsers.add_parser("add-node", help="在方向图里新增一个方向、构成或问题节点")
+    command.add_argument("task")
+    command.add_argument("--title", required=True)
+    command.add_argument("--kind", choices=NODE_KINDS, default="direction")
+    command.add_argument("--hypothesis", help="direction 节点的可证伪假设")
+    command.add_argument("--value", help="这个节点为什么值得做")
+    command.add_argument("--cost", help="粗估代价")
+    command.add_argument("--requires", action="append", default=[], help="必须先 confirmed 的前置节点")
+    command.add_argument("--part-of", action="append", default=[], help="它是哪个节点的功能构成")
+    command.add_argument("--why", required=True, help="为什么现在把它放进图里")
+    command.set_defaults(func=cmd_add_node)
+
+    command = subparsers.add_parser("link", help="在两个节点之间加一条边")
+    command.add_argument("task")
+    command.add_argument("--from", dest="source", required=True)
+    command.add_argument("--to", dest="target", required=True)
+    command.add_argument("--kind", choices=EDGE_KINDS, default="requires")
+    command.add_argument("--note")
+    command.add_argument("--why", required=True, help="为什么现在建立这条关系")
+    command.set_defaults(func=cmd_link)
+
+    command = subparsers.add_parser("unlink", help="删除一条已经不成立的边")
+    command.add_argument("task")
+    command.add_argument("--from", dest="source", required=True)
+    command.add_argument("--to", dest="target", required=True)
+    command.add_argument("--kind", choices=EDGE_KINDS)
+    command.add_argument("--why", required=True, help="为什么这条关系不再成立")
+    command.set_defaults(func=cmd_unlink)
+
+    command = subparsers.add_parser("set-node", help="更新节点状态、假设、证据或复活条件")
+    command.add_argument("task")
+    command.add_argument("node")
+    command.add_argument("--status", choices=NODE_STATUSES)
+    command.add_argument("--title")
+    command.add_argument("--hypothesis")
+    command.add_argument("--value")
+    command.add_argument("--cost")
+    command.add_argument("--reason", help="当前状态的理由")
+    command.add_argument("--revisit-when", help="暂缓或放弃时，什么新事实会让它重新值得考虑")
+    command.add_argument("--evidence-ref", action="append", default=[])
+    command.add_argument("--why", required=True, help="为什么现在改变这个判断")
+    command.set_defaults(func=cmd_set_node)
+
+    command = subparsers.add_parser("frontier", help="重算方向图，列出就绪、等待、阻塞与待复核节点")
+    command.add_argument("task")
+    command.add_argument("--format", choices=("text", "json", "mermaid"), default="text")
+    command.set_defaults(func=cmd_frontier)
 
     command = subparsers.add_parser("check", help="校验记录的恢复结构")
     command.add_argument("path", nargs="?")

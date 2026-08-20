@@ -50,7 +50,11 @@ Task/Loop/Run 工作协议。
 
 - Task 管长期目标，Loop 管一个可证伪方向或阶段，Run 管一次具体执行结果。
 - 目标、范围或验收仍模糊时使用 `design-grill`，不要带着迷雾直接实施。
-- Task、Loop 或 Run 打开、恢复、遇到关键结果或阻塞时使用 `next-action`，只选择一个当前可执行动作。
+- Task 的方向空间保存在 `tasks/<task>/graph.json`：节点是方向、功能构成或未知问题，`requires` 边给出
+  前置依赖，图随新证据更新。
+- Task、Loop 或 Run 打开、恢复、遇到关键结果或阻塞时使用 `next-action`：先用 `frontier` 重算就绪集合，
+  只在就绪节点里选择一个当前可执行动作。
+- 放弃或暂缓一个方向必须记录复活条件，放弃的节点每次重算前沿都会被重新列出复核。
 - 只有会改变下一步、支撑结论或用于恢复与交接的事实才使用 `evidence-checkpoint`。
 - Run 的 `contract.json` 打开后保持不变；执行偏差进入 checkpoint 或 `result.json`，不要改写合同制造通过。
 - 不生成 `status.md`、会话日志、强制签名、晋升状态、插件锁或空证据文件。

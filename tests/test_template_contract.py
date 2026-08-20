@@ -76,6 +76,7 @@ class TemplateContractTest(unittest.TestCase):
             "docs/home-engineering.md",
             "docs/code-workspace.md",
             "docs/agent-home-usage.md",
+            "docs/direction-graph.md",
             ".agents/scripts/agent_home.py",
         ):
             self.assertTrue((ROOT / path).is_file(), path)
@@ -180,6 +181,21 @@ class TemplateContractTest(unittest.TestCase):
         self.assertIn("agent-home-sync", rules)
         self.assertIn("/.agent-home/upstream/", (ROOT / ".gitignore").read_text())
         self.assertIn("agent-home-usage.md", (ROOT / "docs/README.md").read_text())
+
+    def test_direction_graph_is_wired_into_navigation(self):
+        navigation = (ROOT / ".agents/skills/next-action/SKILL.md").read_text()
+        for statement in ("frontier", "就绪", "requires", "--node", "revisit-when"):
+            self.assertIn(statement, navigation)
+        workflow_skill = (ROOT / ".agents/skills/task-loop-run/SKILL.md").read_text()
+        self.assertIn("方向图", workflow_skill)
+        self.assertIn("graph.json", workflow_skill)
+        self.assertIn("add-node", (ROOT / ".agents/skills/design-grill/SKILL.md").read_text())
+        rules = (ROOT / "AGENTS.md").read_text()
+        self.assertIn("graph.json", rules)
+        self.assertIn("frontier", rules)
+        readme = (ROOT / "README.md").read_text()
+        self.assertIn("docs/direction-graph.md", readme)
+        self.assertIn("direction-graph.md", (ROOT / "docs/README.md").read_text())
 
     def test_code_workspace_is_ignored_and_documented(self):
         self.assertIn("/.code/", (ROOT / ".gitignore").read_text())
