@@ -219,15 +219,16 @@ class TemplateContractTest(unittest.TestCase):
 
     def test_direction_graph_is_wired_into_navigation(self):
         navigation = (ROOT / ".agents/skills/next-action/SKILL.md").read_text()
-        for statement in ("frontier", "就绪", "requires", "--node", "revisit-when"):
+        for statement in ("graph.json", "就绪", "requires", "--node", "revisit_when"):
             self.assertIn(statement, navigation)
         workflow_skill = (ROOT / ".agents/skills/task-loop-run/SKILL.md").read_text()
         self.assertIn("方向图", workflow_skill)
         self.assertIn("graph.json", workflow_skill)
-        self.assertIn("add-node", (ROOT / ".agents/skills/design-grill/SKILL.md").read_text())
+        self.assertIn("graph.json", (ROOT / ".agents/skills/design-grill/SKILL.md").read_text())
         rules = (ROOT / "AGENTS.md").read_text()
         self.assertIn("graph.json", rules)
-        self.assertIn("frontier", rules)
+        self.assertIn("前置门禁", rules)
+        self.assertIn("复活条件", rules)
         readme = (ROOT / "README.md").read_text()
         self.assertIn("docs/direction-graph.md", readme)
         self.assertIn("direction-graph.md", (ROOT / "docs/README.md").read_text())

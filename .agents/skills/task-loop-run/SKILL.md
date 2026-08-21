@@ -43,28 +43,14 @@ description: 在仓库内用 Task、Loop 和 Run 记录管理持久工作。当�
 
 ## 方向图
 
-1. Task 的方向空间是一张有向无环图：节点是方向、功能构成或未知问题，`requires` 边表示前置依赖。
-   `open-task` 会建立空图，方向随调研逐步入图：
-
-   ```bash
-   python .agents/skills/task-loop-run/scripts/workflow.py add-node tasks/<task> \
-     --title "<方向>" --kind direction --hypothesis "<可证伪假设>" \
-     --value "<为什么值得做>" --cost "<粗估代价>" --requires <前置节点> --why "<为什么现在入图>"
-   ```
-
-2. 每次决策前重算前沿，只在就绪节点里选，并逐条复核暂缓与放弃的方向：
-
-   ```bash
-   python .agents/skills/task-loop-run/scripts/workflow.py frontier tasks/<task>
-   ```
-
+1. Task 的方向空间是一张有向无环图，保存在 `tasks/<task>/graph.json`：节点是方向、功能构成或未知
+   问题，`requires` 边表示前置依赖。`open-task` 会建立空图，方向随调研直接写进这个文件。
+2. 每次决策前重算分组，只在就绪节点里选，并逐条复核 `deferred` 与 `abandoned` 的方向，做法见
+   `next-action`，字段定义见 `docs/direction-graph.md`。
 3. 方向节点由 Loop 承载，构成节点通常由 Run 承载。`open-loop --node <节点>` 会校验前置并把节点标为
    `active`，`close-loop` 按判定把它写回 `confirmed`、`falsified`、`blocked` 或 `abandoned`。
-4. 图随新发现更新：`link`、`unlink`、`set-node` 都会追加到 `graph-events.jsonl`，可以回放判断的演化。
-5. 转为 `deferred` 或 `abandoned` 必须写 `--revisit-when`。放弃的方向不会从图上消失，每次重算前沿都
-   会连同复活条件一起列出。
-
-详见 `next-action` 与 `docs/direction-graph.md`。
+4. 转为 `deferred` 或 `abandoned` 必须写 `revisit_when`，`check` 会拒绝没有复活条件的放弃。放弃的
+   方向留在图上，每次重算都要连同复活条件一起复核。
 
 ## 目标代码仓
 
@@ -129,7 +115,6 @@ description: 在仓库内用 Task、Loop 和 Run 记录管理持久工作。当�
 
 - `tasks/<task>/task.json`：目标、生命周期、最终结果、代码仓登记和 Task 导航。
 - `tasks/<task>/graph.json`：方向图的当前节点与边。
-- `tasks/<task>/graph-events.jsonl`：只追加的图变更审计。
 - `tasks/<task>/grill/`：设计简报、Task 术语、风险和决策。
 - `loops/<loop>/goal.md`、`hypotheses.md`、`state.json`：冻结的方向和 Loop 导航。
 - `runs/<run>/contract.json`：不可变的执行合同。

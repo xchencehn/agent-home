@@ -131,7 +131,6 @@ Task 使用 `NNN_slug` 自动编号。一个典型记录如下：
 tasks/001_example/
 ├── task.json
 ├── graph.json
-├── graph-events.jsonl
 ├── grill/
 │   ├── design-brief.md
 │   ├── glossary.md
@@ -158,14 +157,10 @@ python .agents/skills/task-loop-run/scripts/workflow.py check
 Run 打开后，`contract.json` 不再改写；事实追加到 `checkpoints.jsonl`，当前恢复位置在 `state.json`，
 最终结果进入 `result.json`。没有生成状态页、插件锁、插件市场、安装缓存或强制验收状态机。
 
-Task 的候选方向保存在 `graph.json`：节点是方向、功能构成或未知问题，`requires` 边给出前置依赖。每次
-决策先重算就绪集合，只在就绪节点里选一个；被放弃的方向留在图上并携带复活条件，每次都会被重新列出
-复核。完整模型见 [方向图：在依赖图上选择下一步](docs/direction-graph.md)。
-
-```bash
-python .agents/skills/task-loop-run/scripts/workflow.py frontier tasks/001_example
-python .agents/skills/task-loop-run/scripts/workflow.py frontier tasks/001_example --format mermaid
-```
+Task 的候选方向保存在 `graph.json`：节点是方向、功能构成或未知问题，`requires` 边给出前置依赖。图由
+Agent 直接编辑，`workflow.py` 只做两件事——前置未满足时拒绝选步，`check` 校验结构并拒绝没有复活条件
+的放弃。每次决策先重算就绪集合，只在就绪节点里选一个；被放弃的方向留在图上并携带复活条件。记录格式
+与游走方法见 [方向图：记录格式与图上游走](docs/direction-graph.md)。
 
 完整设计思想见 [Agent Home：项目自有的持久工作环境](docs/home-engineering.md)。
 

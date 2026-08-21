@@ -24,17 +24,10 @@ description: 把粗略的 Task 或待选 Loop 塑造成边界清晰、可以验�
    - `grill/risks.md`：风险、后果、探针和转向条件；
    - `grill/decisions.md`：轻量决策及其证据。
 
-4. 把梳理出的候选方向写进 Task 的方向图，而不是只留在文字里：每个候选一个 `direction` 节点，已经
-   看得见的功能构成用 `component` 节点，尚未成形的未知项用 `question` 节点，能确认的前置关系用
-   `requires` 边连起来。
-
-   ```bash
-   python .agents/skills/task-loop-run/scripts/workflow.py add-node tasks/<task> \
-     --title "<候选方向>" --kind direction --hypothesis "<可证伪假设>" \
-     --value "<为什么值得做>" --cost "<粗估代价>" --why "<入图理由>"
-   ```
-
-   排除的方向也入图，用 `set-node --status abandoned --revisit-when "<复活条件>"` 记录，不要直接丢弃。
+4. 把梳理出的候选方向写进 `tasks/<task>/graph.json`，而不是只留在文字里：每个候选一个 `direction`
+   节点，已经看得见的功能构成用 `component` 节点，尚未成形的未知项用 `question` 节点，能确认的前置
+   关系用 `requires` 边连起来。排除的方向也留在图上，状态写 `abandoned` 并填 `revisit_when`，
+   不要直接丢弃。字段定义见 `docs/direction-graph.md`。
 5. 只有仓库证据无法回答的意图或取舍才询问用户。
 6. 当一个 Loop 方向已经具备可证伪假设、验收证据、证伪证据、允许改变的范围和转向条件时停止。
 

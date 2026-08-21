@@ -1,42 +1,38 @@
 ---
 name: next-action
-description: 在方向图上重算就绪集合，并从中选出一个精确的下一步。当 Task、Loop 或 Run 打开、恢复、得到改变决策的结果、遇到阻塞、改变方向或需要交接时使用。不要生成推测性的未来待办链。
+description: 在 Task 的方向图上重算就绪集合，复核被放弃的方向，再选出一个精确且可执行的下一步。当 Task、Loop 或 Run 打开、恢复、得到改变决策的结果、遇到阻塞、改变方向或需要交接时使用。不要生成推测性的未来待办链。
 ---
 
 # 下一步导航
 
-方向空间是一张有向无环图：节点是方向、功能构成或未知问题，`requires` 边给出前置依赖。导航遵循
-`定向 → 重算图 → 选一步 → 执行 → 观察 → 更新图 → 重算`，本质是在图上做最佳优先搜索。
+方向空间是一张有向无环图，保存在 `tasks/<task>/graph.json`：节点是方向、功能构成或未知问题，
+`requires` 边给出前置依赖。导航遵循 `定向 → 重算图 → 选一步 → 执行 → 观察 → 更新图 → 重算`，
+本质是在图上做最佳优先搜索。图由你直接编辑，工具只负责前置门禁与结构校验。
 
 ## 重算方向图
 
-1. 读取最小范围内的当前 Task、Loop 或 Run 状态，以及决定性的检查点引用。
-2. 重算前沿，而不是凭记忆挑候选：
+1. 读取当前 Task、Loop 或 Run 状态、决定性的检查点引用，以及 `graph.json`。
+2. 按状态与依赖把节点分组，不要凭记忆挑候选：
 
-   ```bash
-   python .agents/skills/task-loop-run/scripts/workflow.py frontier tasks/<task>
-   ```
+   - **推进中**：`active`，已有 Loop 或 Run 承载；
+   - **就绪**：`open` 且所有 `requires` 前置都是 `confirmed`；
+   - **等待前置**：`open` 但仍有前置未 `confirmed`，记下缺哪几个；
+   - **外部阻塞**：`blocked`；
+   - **需要重新评估**：`deferred` 与 `abandoned`；
+   - **已定论**：`confirmed`、`falsified`、`superseded`。
 
-   输出分为推进中、就绪、等待前置、外部阻塞、需要重新评估和已定论六组。
-3. 逐条复核“需要重新评估”组。这些是暂缓与放弃的方向，每次决策都会重新列出：对照它们的复活条件与
-   最新证据，判断当时的放弃理由是否已经不成立。发现机会时先复活节点，再继续选步。
-4. 根据最新证据更新图本身，不要把图当成一次性计划：
+3. 逐条复核“需要重新评估”组。对照每个节点的 `revisit_when` 与最新证据，判断当时的放弃理由是否
+   已经不成立。发现机会时先把它改回 `open` 并补上 `evidence_refs`，再继续选步。
+4. 根据新证据直接更新 `graph.json`：新方向加节点，新依赖加 `requires` 边，判断改变就改 `status`
+   和 `reason`，依赖判断有误就删掉那条边。图是活的，不是一次成型的计划。
+5. 转为 `deferred` 或 `abandoned` 时必须同时写 `revisit_when`，否则 `check` 会失败：没有复活条件的
+   放弃等于永久丢弃机会。
 
-   ```bash
-   python .agents/skills/task-loop-run/scripts/workflow.py add-node tasks/<task> \
-     --title "<方向或构成>" --kind direction --hypothesis "<可证伪假设>" \
-     --value "<为什么值得做>" --cost "<粗估代价>" --requires <前置节点> --why "<为什么现在入图>"
-   python .agents/skills/task-loop-run/scripts/workflow.py link tasks/<task> \
-     --from <节点> --to <前置节点> --kind requires --why "<新发现的依赖>"
-   python .agents/skills/task-loop-run/scripts/workflow.py set-node tasks/<task> <节点> \
-     --status confirmed --evidence-ref "<证据>" --why "<改变判断的原因>"
-   ```
-
-   转为 `deferred` 或 `abandoned` 时必须写 `--revisit-when`：没有复活条件的放弃等于永久丢弃机会。
+节点字段与状态取值见 `docs/direction-graph.md`。
 
 ## 选一步
 
-1. 候选只从就绪组里取：前置未满足的节点不能选，先推进它的前置或修改依赖关系。
+1. 候选只从就绪组里取。前置未满足的节点不能选，先推进它的前置或修正依赖关系。
 2. 依次优先考虑：解锁的后继数量、对目标的关键性、信息增益、较低代价和可逆性。
 3. 只选一个，并把它绑定到节点上：
 
@@ -48,13 +44,10 @@ description: 在方向图上重算就绪集合，并从中选出一个精确的�
      --source-ref "<路径或证据引用>"
    ```
 
-   图非空时，`probe`、`execute`、`decide`、`verify` 必须绑定节点，或用 `--off-graph` 说明理由。
-4. 方向节点由 Loop 承载，构成节点通常由 Run 承载：
-
-   ```bash
-   python .agents/skills/task-loop-run/scripts/workflow.py open-loop tasks/<task> <slug> --node <节点> ...
-   ```
-
+   命令会拒绝前置未满足、已定论或不存在的节点。图非空时 `probe`、`execute`、`decide`、`verify`
+   必须绑定节点，或用 `--off-graph` 说明这一步为什么在图外。
+4. 方向节点由 Loop 承载，构成节点通常由 Run 承载。`open-loop --node <节点>` 会校验前置并把节点标成
+   `active`，`close-loop` 按判定写回节点状态。
 5. 没有候选可以执行时，记录阻塞并保持 `next_action` 为空：
 
    ```bash
@@ -66,4 +59,4 @@ description: 在方向图上重算就绪集合，并从中选出一个精确的�
 和 `closeout`。目标处于 `foggy` 时只允许前四类和 `unblock`；普通实施要求目标已经 `clear`。
 
 执行一步、观察结果，然后重新计算，不要静默继续下一个候选。等待是一种状态，不是动作。交接时复制的
-`next_action` 只是上下文，不是实时真值；恢复后必须重新重算前沿。
+`next_action` 只是上下文，不是实时真值；恢复后必须重新重算。

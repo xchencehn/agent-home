@@ -1,23 +1,83 @@
-# 方向图：在依赖图上选择下一步
+# 方向图：记录格式与图上游走
 
-“方向图”是本仓的自定义名称，对应的标准概念是**有向无环图（DAG）**上的**最佳优先搜索**：图节点是候选
-方向与它们的功能构成，`requires` 边是**前置依赖**，每次决策在**就绪集合（frontier）**上按评分选一个节点
-展开，观察结果后更新图再重算——即**在线搜索**，而不是一次成型的计划。
+“方向图”是本仓的自定义名称，对应的标准概念是**有向无环图（DAG）**上的**最佳优先搜索**：节点是候选
+方向与它们的功能构成，`requires` 边是**前置依赖**，每次决策在**就绪集合**上按评分选一个节点展开，
+观察结果后更新图再重算——即**在线搜索**，而不是一次成型的计划。
+
+图是一份记录格式加一套游走方法，由 Agent 直接编辑 `tasks/<task>/graph.json`。`workflow.py` 只做两件
+机械的事：**前置门禁**与**结构校验**。分组、排序、取舍都由 Agent 判断。
 
 ## 解决什么问题
 
-早期的 `next-action` 把候选保存成一张扁平列表，有三个结构性缺陷：
+早期把候选保存成一张扁平列表，有三个结构性缺陷：
 
 1. **依赖不可见**：无法表达“做 B 之前必须先确认 A”，容易在前置未定时就动手实施。
 2. **构成不可见**：一个方向由哪些功能单元组成、缺哪一块，没有位置记录。
 3. **放弃即遗忘**：被排除的方向从列表里消失，当时的排除理由和后来出现的新证据再也对不上。
 
-图模型把这三件事变成可以机械检查的结构：拓扑约束挡住越级实施，`part-of` 边记录功能构成，被放弃的
-节点留在图上并强制携带复活条件。
+## 记录格式
 
-## 节点与边
+`open-task` 会创建空图，之后直接编辑它：
 
-节点保存在 `tasks/<task>/graph.json`：
+```json
+{
+  "schema_version": 1,
+  "kind": "direction_graph",
+  "task_id": "001_compiler",
+  "created_at": "2026-08-20T10:13:00+00:00",
+  "updated_at": "2026-08-20T11:02:00+00:00",
+  "nodes": [
+    {
+      "id": "N001",
+      "kind": "component",
+      "title": "捕获前后 IR 的最小探针",
+      "status": "confirmed",
+      "hypothesis": null,
+      "value": "所有方向都要读 IR",
+      "cost": "小",
+      "evidence_refs": ["tasks/001_compiler/loops/001_probe/runs/001_capture/result.json"],
+      "reason": "工具链可以导出前后 IR",
+      "revisit_when": null,
+      "realized_as": "loops/001_probe",
+      "created_at": "2026-08-20T10:13:00+00:00",
+      "updated_at": "2026-08-20T10:41:00+00:00"
+    },
+    {
+      "id": "N002",
+      "kind": "direction",
+      "title": "动态 shape 感知的融合与划分闭环",
+      "status": "open",
+      "hypothesis": "在动态 shape 下融合加划分能带来端到端收益",
+      "value": "直接对准目标",
+      "cost": "中",
+      "evidence_refs": [],
+      "reason": null,
+      "revisit_when": null,
+      "realized_as": null,
+      "created_at": "2026-08-20T10:13:00+00:00",
+      "updated_at": "2026-08-20T10:13:00+00:00"
+    },
+    {
+      "id": "N003",
+      "kind": "direction",
+      "title": "自研完整前端",
+      "status": "abandoned",
+      "hypothesis": "自研前端比复用更可控",
+      "value": "长期可控",
+      "cost": "高",
+      "evidence_refs": ["reports/frontend-survey.md"],
+      "reason": "自研代价远高于复用，且不解决当前瓶颈",
+      "revisit_when": "出现现成的可复用前端，或复用路线在动态 shape 上被证伪",
+      "realized_as": null,
+      "created_at": "2026-08-20T10:13:00+00:00",
+      "updated_at": "2026-08-20T10:52:00+00:00"
+    }
+  ],
+  "edges": [{ "from": "N002", "to": "N001", "kind": "requires", "note": null }]
+}
+```
+
+节点字段：
 
 | 字段 | 含义 |
 | --- | --- |
@@ -31,8 +91,25 @@
 | `realized_as` | 承载它的 Loop 或 Run |
 
 边有五种：`requires`（前置依赖，构成拓扑约束）、`part-of`（功能构成）、`informs`（证据相关但不阻塞）、
-`conflicts`（互斥）、`supersedes`（取代）。`{"from": "A", "to": "B", "kind": "requires"}` 读作“A 依赖 B”，
-只有 B 变成 `confirmed`，A 才进入就绪集合。`requires` 边必须无环，`check` 会做深度优先检测。
+`conflicts`（互斥）、`supersedes`（取代）。`{"from": "N002", "to": "N001", "kind": "requires"}` 读作
+“N002 依赖 N001”，只有 N001 变成 `confirmed`，N002 才进入就绪集合。
+
+## 图上游走
+
+每次决策前把节点分成六组，只在**就绪**组里选：
+
+| 组 | 判定 |
+| --- | --- |
+| 推进中 | `active` |
+| 就绪 | `open` 且所有 `requires` 前置都是 `confirmed` |
+| 等待前置 | `open` 但仍有前置未 `confirmed` |
+| 外部阻塞 | `blocked` |
+| 需要重新评估 | `deferred`、`abandoned` |
+| 已定论 | `confirmed`、`falsified`、`superseded` |
+
+排序参考解锁的后继数量、对目标的关键性、信息增益、代价和可逆性。选中后用
+`set-next-action --node <节点>` 绑定；观察结果后更新节点状态与证据，再重算。新发现随时加节点、加边，
+依赖判断有误就删边。
 
 ## 与 Task / Loop / Run 的关系
 
@@ -42,62 +119,39 @@
 | Loop | 承载一个 `direction` 节点，把它推进到 `confirmed` 或 `falsified` |
 | Run | 承载一次有边界的执行，通常对应一个 `component` 节点 |
 
-图管**规划**，Loop 和 Run 管**执行**。执行侧仍然是单活动：一个 Task 同时只有一个活动 Loop，一个 Loop
-同时只有一个活动 Run。图上可以同时存在多个就绪节点，但每次只选一个展开——并行的是候选，不是执行。
+图管**规划**，Loop 和 Run 管**执行**。图上可以同时有多个就绪节点，但每次只选一个展开——并行的是
+候选，不是执行。
 
-`open-loop --node <节点>` 会先校验前置全部 `confirmed`，再把节点标成 `active` 并记录承载关系；
-`close-loop` 按判定把节点写回 `confirmed`、`falsified`、`blocked` 或 `abandoned`。
+## 工具只做两件事
 
-## 决策循环
+**前置门禁**（实时拒绝）：
 
 ```bash
-python .agents/skills/task-loop-run/scripts/workflow.py frontier tasks/<task>
+$ workflow.py set-next-action tasks/001_compiler --node N002 --kind probe ...
+错误：节点 N002 不在就绪集合里（状态 open）：先满足它的前置，或先复核它的状态
 ```
 
-输出分六组：推进中、就绪、等待前置、外部阻塞、需要重新评估、已定论。选择规则：
+`open-loop --node` 同样校验前置，并把节点标成 `active` 记录承载关系；`close-loop` 按判定写回节点状态，
+判定为 `abandoned` 时要求 `--revisit-when`。图非空时 `probe`、`execute`、`decide`、`verify` 必须绑定
+节点或用 `--off-graph` 说明理由。
 
-1. 只在**就绪**组里选。等待前置的节点会显示缺哪些前置，先推进前置或修改依赖关系。
-2. 排序参考解锁的后继数量（`解锁 N`）、对目标的关键性、信息增益、代价和可逆性。
-3. 选中后绑定节点：`set-next-action --node <节点>`。图非空时 `probe`、`execute`、`decide`、`verify`
-   必须绑定节点，或用 `--off-graph` 说明为什么这一步在图外。
-4. 观察结果 → `set-node` 更新状态与证据 → 重算前沿。新发现随时 `add-node` / `link` / `unlink`。
+**结构校验**（`workflow.py check`）：节点 ID 唯一、类型与状态取值合法、边两端存在且不自环、`requires`
+无环、`deferred` 与 `abandoned` 必须有 `revisit_when`、`active` 节点必须有承载它的 Loop 或 Run。
 
-`frontier --format mermaid` 输出可视化图，`--format json` 供程序消费。
+其余都不做：不渲染视图、不分配 ID、不自动增删节点、不打分排序、不写变更日志。这些要么是 Agent 自己
+该完成的判断，要么是没有价值的仪式。
 
 ## 放弃不等于遗忘
 
-转为 `deferred` 或 `abandoned` 时必须提供 `--revisit-when`，命令会拒绝没有复活条件的放弃：
+`deferred` 与 `abandoned` 的节点留在图上，并且必须带 `revisit_when`。每次重算都要把这一组连同复活
+条件与当时的理由逐条对照最新证据：当时的放弃理由是否仍然成立？发现机会时把状态改回 `open` 并补上
+新的 `evidence_refs`。
 
-```bash
-python .agents/skills/task-loop-run/scripts/workflow.py set-node tasks/<task> N002 \
-  --status abandoned \
-  --reason "自研代价远高于复用，且不解决当前瓶颈" \
-  --revisit-when "出现现成的可复用前端，或复用路线在动态 shape 上被证伪" \
-  --why "首轮调研显示复用路线足够"
-```
-
-这些节点不会从图上消失。每次 `frontier` 都会把它们连同复活条件与当时的理由列在“需要重新评估”组，
-决策时必须逐条对照最新证据判断当时的理由是否仍然成立。发现机会时用
-`set-node --status open --evidence-ref <新证据>` 让它重新进入候选。
-
-机制上的要点是：**放弃条件必须写成可对照的事实，而不是感受**。写不出复活条件，说明这个方向要么其实
-没被真正评估过，要么应该用 `superseded` 记录它被谁取代。
-
-## 图的演化与审计
-
-`add-node`、`link`、`unlink`、`set-node`、`open-loop`、`close-loop` 都要求 `--why`（生命周期命令用目标或
-结论代替），每次改动追加一行到 `tasks/<task>/graph-events.jsonl`。恢复或交接时回放这个文件，可以看到
-判断是怎么随证据变化的，而不是只看到最终形态。
-
-## 校验
-
-`workflow.py check` 对图执行：节点 ID 唯一、类型与状态取值合法、边两端存在且不自环、`requires` 无环、
-`deferred` 与 `abandoned` 必须有复活条件、`active` 节点必须有承载它的 Loop 或 Run。
+要点是：**放弃条件必须写成可对照的事实，而不是感受**。写不出复活条件，说明这个方向要么其实没被真正
+评估过，要么应该用 `superseded` 记录它被谁取代。
 
 ## 边界
 
-- 工具只做机械部分：拓扑约束、就绪计算、解锁计数、复活项的强制展示。**排序与取舍由模型和人判断**，
-  不做自动打分或自动规划。
-- 不引入并行执行。图上多个节点同时就绪，仍然只选一个展开。
-- 不自动增删节点。图的每次变化都要有理由并留下审计。
 - 没有 Task 的一次性请求不需要建图；图只在长期、多方向的 Task 里有价值。
+- 图不是待办清单。节点是候选方向与构成，不是工序步骤。
+- 不引入并行执行。图上多个节点同时就绪，仍然只选一个展开。
